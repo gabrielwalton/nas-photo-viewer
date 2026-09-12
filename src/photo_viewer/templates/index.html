@@ -10,9 +10,10 @@
   <main id="viewer" aria-live="polite">
     <img id="photo-a" class="photo active" alt="">
     <img id="photo-b" class="photo" alt="">
+    <video id="video" class="video" playsinline></video>
     <section id="message" class="message-card">
       <h1>NAS Photo Viewer</h1>
-      <p id="message-text">Open settings to connect your photo library.</p>
+      <p id="message-text">Open settings to connect your photo and video library.</p>
       <button id="open-settings-primary">Open settings</button>
     </section>
     <button id="settings-button" class="round-button" aria-label="Settings">⚙</button>
@@ -21,7 +22,7 @@
 
   <dialog id="settings-dialog">
     <form id="settings-form">
-      <header><h2>Photo viewer settings</h2><button type="button" id="close-settings" aria-label="Close">×</button></header>
+      <header><h2>Photo and video settings</h2><button type="button" id="close-settings" aria-label="Close">×</button></header>
       <label>Photo location
         <select name="source_type"><option value="smb">NAS / SMB share</option><option value="local">Local folder</option></select>
       </label>
@@ -45,4 +46,3 @@
   <script src="/static/app.js"></script>
 </body>
 </html>
-

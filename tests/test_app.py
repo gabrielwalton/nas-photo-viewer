@@ -24,3 +24,33 @@ def test_local_slideshow(tmp_path):
     assert item["interval_seconds"] == 7
     assert client.get(item["url"]).data == b"jpeg-placeholder"
 
+
+def test_video_is_catalogued_and_supports_byte_ranges(tmp_path):
+    photos = tmp_path / "photos"
+    photos.mkdir()
+    (photos / "clip.mp4").write_bytes(b"0123456789")
+    app = create_app({"TESTING": True, "PHOTO_VIEWER_DATA_DIR": str(tmp_path / "data")})
+    client = app.test_client()
+    client.put("/api/config", json={"source_type": "local", "local_path": str(photos)})
+    item = client.get("/api/next").json
+    assert item["kind"] == "video"
+    response = client.get(item["url"], headers={"Range": "bytes=2-5"})
+    assert response.status_code == 206
+    assert response.data == b"2345"
+    assert response.headers["Content-Range"] == "bytes 2-5/10"
+
+
+def test_runtime_accepts_current_item_and_favourite(tmp_path):
+    app = create_app({"TESTING": True, "PHOTO_VIEWER_DATA_DIR": str(tmp_path)})
+    client = app.test_client()
+    assert (
+        client.post(
+            "/api/current",
+            json={"path": "family/photo.jpg", "name": "photo.jpg", "kind": "image"},
+        ).status_code
+        == 200
+    )
+    assert client.post("/api/favourite").json == {"ok": True}
+    state = client.get("/api/runtime").json
+    assert state["current_name"] == "photo.jpg"
+    assert state["favourite"] is True

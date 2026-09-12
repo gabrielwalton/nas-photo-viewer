@@ -112,4 +112,3 @@ class ConfigStore:
         )
         os.chmod(temporary, 0o600)
         os.replace(temporary, self.path)
-
