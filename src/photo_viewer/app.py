@@ -30,7 +30,7 @@ class Catalogue:
 
     def refresh(self, store: ConfigStore, force: bool = False) -> list[MediaItem]:
         with self.lock:
-            if not force and time.monotonic() - self.loaded_at < 60:
+            if self.loaded_at and not force and time.monotonic() - self.loaded_at < 60:
                 return self.items
             try:
                 self.items = make_source(store.load()).media()

@@ -25,7 +25,8 @@ def test_local_slideshow(tmp_path):
     assert client.get(item["url"]).data == b"jpeg-placeholder"
 
 
-def test_video_is_catalogued_and_supports_byte_ranges(tmp_path):
+def test_video_is_catalogued_and_supports_byte_ranges(tmp_path, monkeypatch):
+    monkeypatch.setattr("photo_viewer.app.time.monotonic", lambda: 10.0)
     photos = tmp_path / "photos"
     photos.mkdir()
     (photos / "clip.mp4").write_bytes(b"0123456789")
