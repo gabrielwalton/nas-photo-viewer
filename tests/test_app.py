@@ -55,3 +55,37 @@ def test_runtime_accepts_current_item_and_favourite(tmp_path):
     state = client.get("/api/runtime").json
     assert state["current_name"] == "photo.jpg"
     assert state["favourite"] is True
+
+
+def test_display_mode_writes_url_and_returns_to_photos(tmp_path):
+    restarts = []
+    app = create_app(
+        {
+            "TESTING": True,
+            "PHOTO_VIEWER_DATA_DIR": str(tmp_path / "data"),
+            "PHOTO_VIEWER_KIOSK_URL_FILE": str(tmp_path / "kiosk-url"),
+            "PHOTO_VIEWER_KIOSK_CONTROL_SUPPORTED": True,
+            "PHOTO_VIEWER_TERMINATE_BROWSER": lambda: restarts.append(True),
+        }
+    )
+    client = app.test_client()
+    client.put(
+        "/api/config",
+        json={
+            "source_type": "local",
+            "local_path": str(tmp_path),
+            "dashboard_url": "http://homeassistant:8123/dashboard/home?kiosk",
+        },
+    )
+    response = client.post("/api/display", json={"mode": "dashboard"})
+    assert response.json["display_mode"] == "dashboard"
+    assert (tmp_path / "kiosk-url").read_text().strip().startswith(
+        "http://homeassistant"
+    )
+    assert restarts == [True]
+    response = client.post("/api/display", json={"mode": "photos"})
+    assert response.json["display_mode"] == "photos"
+    assert (tmp_path / "kiosk-url").read_text().strip() == (
+        "http://127.0.0.1:8080"
+    )
+    assert restarts == [True, True]

@@ -13,8 +13,10 @@ from a local directory or an SMB share on a NAS.
 - Random playback without immediate repeats.
 - Play videos to the end and use the configured timer for still images.
 - Configurable display duration, contain/cover fit and fade transition.
-- Publish pause, next, favourite, refresh, timer, folder, fit and status
-  controls to Home Assistant through MQTT Discovery.
+- Publish pause, next, favourite, refresh, timer, folder, fit, display mode and
+  status controls to Home Assistant through MQTT Discovery.
+- Switch the HDMI output between the slideshow and a Home Assistant dashboard,
+  with an optional timed return to photos.
 - Keep a persistent favourites list on the Pi.
 - Keep NAS credentials only in the Pi's persistent data directory.
 - Stay healthy while unconfigured so initial Managed Pi deployment succeeds.
@@ -27,3 +29,8 @@ After deployment, open `http://<pi-address>:8080` from a device on the same LAN.
 The HDMI kiosk launcher is supplied by the Managed Pi base image. Until that
 graphics layer is installed, this service can still be configured and tested
 fully from another browser.
+
+Dashboard switching requires Managed Pi Base v0.3.1 or later. The application
+always restores photo mode when it starts; its background MQTT connection stays
+online while Chromium displays Home Assistant, so Home Assistant can switch the
+same HDMI output back to the slideshow.

@@ -44,6 +44,7 @@ class RuntimeState:
         self.current_path = ""
         self.current_name = ""
         self.current_kind = ""
+        self.display_mode = "photos"
 
     def snapshot(self) -> dict:
         with self.lock:
@@ -54,6 +55,7 @@ class RuntimeState:
                 "current_name": self.current_name,
                 "current_kind": self.current_kind,
                 "favourite": self.favourites.contains(self.current_path),
+                "display_mode": self.display_mode,
             }
 
     def set_current(self, path: str, name: str, kind: str) -> None:
@@ -69,6 +71,10 @@ class RuntimeState:
     def next(self) -> None:
         with self.lock:
             self.command_sequence += 1
+
+    def set_display_mode(self, mode: str) -> None:
+        with self.lock:
+            self.display_mode = mode
 
     def favourite_current(self) -> bool:
         with self.lock:

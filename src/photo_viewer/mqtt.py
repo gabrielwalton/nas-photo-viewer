@@ -11,6 +11,7 @@ from pathlib import Path
 import paho.mqtt.client as mqtt
 
 from .config import ConfigStore, validate
+from .display import DisplayController
 from .runtime import RuntimeState
 
 
@@ -40,10 +41,12 @@ class MqttBridge:
         store: ConfigStore,
         runtime: RuntimeState,
         refresh: Callable[[], tuple[int, str, list[str]]],
+        display: DisplayController,
     ):
         self.store = store
         self.runtime = runtime
         self.refresh_catalogue = refresh
+        self.display = display
         self.host = os.getenv("MANAGED_PI_MQTT_HOST", "").strip()
         self.port = int(os.getenv("MANAGED_PI_MQTT_PORT", "1883"))
         self.device_id = device_id()
@@ -94,9 +97,21 @@ class MqttBridge:
                 self.count, self.error, self.folder_options = self.refresh_catalogue()
                 self.publish_discovery()
                 self.runtime.next()
-            elif command in {"interval", "folder", "fit"}:
+            elif command in {
+                "interval",
+                "folder",
+                "fit",
+                "dashboard_url",
+                "dashboard_return",
+            }:
                 self._update_config(command, value)
                 self.runtime.next()
+            elif command == "mode":
+                config = self.store.load()
+                self.display.show(
+                    value, config.dashboard_url, config.dashboard_return_minutes
+                )
+                self.runtime.set_display_mode(self.display.mode)
         except Exception as exc:
             self.error = str(exc)
         self.publish_state()
@@ -108,6 +123,8 @@ class MqttBridge:
             "interval": "interval_seconds",
             "folder": "base_folder",
             "fit": "fit_mode",
+            "dashboard_url": "dashboard_url",
+            "dashboard_return": "dashboard_return_minutes",
         }[command]
         raw[key] = "" if command == "folder" and value == "/" else value
         self.store.save(validate(raw, current))
@@ -122,7 +139,7 @@ class MqttBridge:
             "name": self.device_name,
             "manufacturer": "Managed Pi",
             "model": "NAS Photo Viewer",
-            "sw_version": "0.2.0",
+            "sw_version": "0.3.0",
         }
         state = f"{self.base}/state"
         definitions = {
@@ -180,6 +197,46 @@ class MqttBridge:
                 "options": ["contain", "cover"],
                 "icon": "mdi:fit-to-screen",
             },
+            ("select", "display_mode"): {
+                "name": "Display mode",
+                "command_topic": f"{self.base}/command/mode",
+                "state_topic": state,
+                "value_template": "{{ value_json.display_mode }}",
+                "options": ["photos", "dashboard"],
+                "icon": "mdi:monitor-dashboard",
+            },
+            ("text", "dashboard_url"): {
+                "name": "Dashboard URL",
+                "command_topic": f"{self.base}/command/dashboard_url",
+                "state_topic": state,
+                "value_template": "{{ value_json.dashboard_url }}",
+                "mode": "text",
+                "icon": "mdi:web",
+            },
+            ("number", "dashboard_return_minutes"): {
+                "name": "Return to photos after",
+                "command_topic": f"{self.base}/command/dashboard_return",
+                "state_topic": state,
+                "value_template": "{{ value_json.dashboard_return_minutes }}",
+                "min": 0,
+                "max": 1440,
+                "step": 1,
+                "mode": "box",
+                "unit_of_measurement": "min",
+                "icon": "mdi:timer-outline",
+            },
+            ("button", "show_photos"): {
+                "name": "Show photos",
+                "command_topic": f"{self.base}/command/mode",
+                "payload_press": "photos",
+                "icon": "mdi:image-multiple",
+            },
+            ("button", "show_dashboard"): {
+                "name": "Show dashboard",
+                "command_topic": f"{self.base}/command/mode",
+                "payload_press": "dashboard",
+                "icon": "mdi:view-dashboard",
+            },
             ("sensor", "current_item"): {
                 "name": "Current item",
                 "state_topic": state,
@@ -228,6 +285,9 @@ class MqttBridge:
                 "status": "error"
                 if self.error
                 else ("paused" if snapshot["paused"] else "playing"),
+                "display_mode": self.display.mode,
+                "dashboard_url": config.dashboard_url,
+                "dashboard_return_minutes": config.dashboard_return_minutes,
             }
         )
         self.client.publish(

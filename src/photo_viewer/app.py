@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import os
 import random
 import threading
 import time
@@ -16,6 +17,7 @@ from flask import (
 )
 
 from .config import ConfigError, ConfigStore, clean_relative, validate
+from .display import DisplayController
 from .mqtt import MqttBridge
 from .runtime import Favourites, RuntimeState
 from .sources import MediaItem, make_source
@@ -66,6 +68,28 @@ def create_app(test_config: dict | None = None) -> Flask:
     catalogue = Catalogue()
     favourites = Favourites(store.data_dir)
     runtime = RuntimeState(favourites)
+    kiosk_url_file = Path(
+        app.config.get(
+            "PHOTO_VIEWER_KIOSK_URL_FILE",
+            os.environ.get(
+                "MANAGED_PI_KIOSK_URL_FILE", "/opt/managed-pi/data/kiosk-url"
+            ),
+        )
+    )
+    support_override = app.config.get("PHOTO_VIEWER_KIOSK_CONTROL_SUPPORTED")
+    display = DisplayController(
+        kiosk_url_file,
+        local_url=os.environ.get(
+            "MANAGED_PI_VIEWER_URL", "http://127.0.0.1:8080"
+        ),
+        supported=(
+            DisplayController.detect_support()
+            if support_override is None
+            else bool(support_override)
+        ),
+        terminate_browser=app.config.get("PHOTO_VIEWER_TERMINATE_BROWSER"),
+    )
+    display.reset_to_photos()
 
     def refresh_for_mqtt() -> tuple[int, str, list[str]]:
         items = catalogue.refresh(store, force=True)
@@ -75,7 +99,13 @@ def create_app(test_config: dict | None = None) -> Flask:
             folders = [store.load().base_folder]
         return len(items), catalogue.error, folders
 
-    bridge = MqttBridge(store, runtime, refresh_for_mqtt)
+    bridge = MqttBridge(store, runtime, refresh_for_mqtt, display)
+
+    def display_changed() -> None:
+        runtime.set_display_mode(display.mode)
+        bridge.publish_state()
+
+    display.set_change_callback(display_changed)
 
     @app.errorhandler(ConfigError)
     def config_error(exc):
@@ -181,6 +211,19 @@ def create_app(test_config: dict | None = None) -> Flask:
     @app.get("/api/runtime")
     def get_runtime():
         return jsonify({"ok": True, **runtime.snapshot()})
+
+    @app.post("/api/display")
+    def set_display():
+        raw = request.get_json(force=True)
+        config = store.load()
+        display.show(
+            str(raw.get("mode", "")),
+            config.dashboard_url,
+            config.dashboard_return_minutes,
+        )
+        runtime.set_display_mode(display.mode)
+        bridge.publish_state()
+        return jsonify({"ok": True, "display_mode": display.mode})
 
     @app.post("/api/current")
     def set_current():

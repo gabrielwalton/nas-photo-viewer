@@ -22,6 +22,8 @@ class ViewerConfig:
     interval_seconds: int = 20
     fit_mode: str = "contain"
     transition_seconds: float = 1.0
+    dashboard_url: str = ""
+    dashboard_return_minutes: int = 0
 
     @property
     def configured(self) -> bool:
@@ -45,12 +47,19 @@ def validate(raw: dict, previous: ViewerConfig | None = None) -> ViewerConfig:
     try:
         interval = int(raw.get("interval_seconds", 20))
         transition = float(raw.get("transition_seconds", 1.0))
+        dashboard_return = int(raw.get("dashboard_return_minutes", 0))
     except (TypeError, ValueError) as exc:
         raise ConfigError("Timing values must be numbers") from exc
     if not 3 <= interval <= 3600:
         raise ConfigError("Display duration must be between 3 and 3600 seconds")
     if not 0 <= transition <= 10:
         raise ConfigError("Fade duration must be between 0 and 10 seconds")
+    if not 0 <= dashboard_return <= 1440:
+        raise ConfigError("Dashboard return time must be between 0 and 1440 minutes")
+
+    dashboard_url = str(raw.get("dashboard_url", "")).strip()
+    if dashboard_url and not dashboard_url.startswith(("http://", "https://")):
+        raise ConfigError("Dashboard URL must start with http:// or https://")
 
     fit_mode = str(raw.get("fit_mode", "contain")).strip().lower()
     if fit_mode not in {"contain", "cover"}:
@@ -76,6 +85,8 @@ def validate(raw: dict, previous: ViewerConfig | None = None) -> ViewerConfig:
         interval_seconds=interval,
         fit_mode=fit_mode,
         transition_seconds=transition,
+        dashboard_url=dashboard_url,
+        dashboard_return_minutes=dashboard_return,
     )
 
 

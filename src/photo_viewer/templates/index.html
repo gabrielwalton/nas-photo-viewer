@@ -39,6 +39,8 @@
         <label>Image fit<select name="fit_mode"><option value="contain">Show whole photo</option><option value="cover">Fill the screen</option></select></label>
       </div>
       <label>Fade duration<input name="transition_seconds" type="number" min="0" max="10" step="0.25"></label>
+      <label>Home Assistant dashboard URL<input name="dashboard_url" type="url" placeholder="http://homeassistant:8123/dashboard/home?kiosk"></label>
+      <label>Return to photos after (minutes)<input name="dashboard_return_minutes" type="number" min="0" max="1440"><small>Use 0 to stay on the dashboard.</small></label>
       <p id="form-status"></p>
       <footer><button type="button" id="test-button" class="secondary">Save and test</button><button type="submit">Save settings</button></footer>
     </form>
