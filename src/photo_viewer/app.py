@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
 import random
 import threading
@@ -24,27 +25,78 @@ from .sources import MediaItem, make_source
 
 
 class Catalogue:
-    def __init__(self):
+    def __init__(self, cache_path: Path, initial_config):
+        self.cache_path = cache_path
         self.items: list[MediaItem] = []
         self.loaded_at = 0.0
         self.error = ""
         self.lock = threading.Lock()
+        self._load_cache(initial_config)
+
+    @staticmethod
+    def _key(config) -> dict:
+        return {
+            "source_type": config.source_type,
+            "local_path": config.local_path,
+            "smb_server": config.smb_server,
+            "smb_share": config.smb_share,
+            "base_folder": config.base_folder,
+        }
+
+    def _load_cache(self, config) -> None:
+        try:
+            raw = json.loads(self.cache_path.read_text(encoding="utf-8"))
+            if raw.get("source") != self._key(config):
+                return
+            self.items = [MediaItem(**item) for item in raw.get("items", [])]
+            if self.items:
+                self.loaded_at = time.monotonic()
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            self.items = []
+
+    def _save_cache(self, config) -> None:
+        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.cache_path.with_suffix(".tmp")
+        payload = {
+            "source": self._key(config),
+            "items": [
+                {"path": item.path, "name": item.name, "kind": item.kind}
+                for item in self.items
+            ],
+        }
+        temporary.write_text(json.dumps(payload), encoding="utf-8")
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, self.cache_path)
 
     def refresh(self, store: ConfigStore, force: bool = False) -> list[MediaItem]:
         with self.lock:
             if self.loaded_at and not force and time.monotonic() - self.loaded_at < 60:
                 return self.items
-            try:
-                self.items = make_source(store.load()).media()
+        try:
+            config = store.load()
+            items = make_source(config).media()
+            with self.lock:
+                self.items = items
                 self.error = ""
-            except Exception as exc:
+                self._save_cache(config)
+                self.loaded_at = time.monotonic()
+                return self.items
+        except Exception as exc:
+            with self.lock:
                 self.items = []
                 self.error = str(exc)
-            self.loaded_at = time.monotonic()
-            return self.items
+                self.loaded_at = time.monotonic()
+                return self.items
 
-    def invalidate(self) -> None:
-        self.loaded_at = 0.0
+    def invalidate(self, clear: bool = False) -> None:
+        with self.lock:
+            self.loaded_at = 0.0
+            if clear:
+                self.items = []
+                try:
+                    self.cache_path.unlink()
+                except FileNotFoundError:
+                    pass
 
     def remove(self, path: str) -> int:
         with self.lock:
@@ -70,7 +122,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         app.config.update(test_config)
     data_dir = app.config.get("PHOTO_VIEWER_DATA_DIR")
     store = ConfigStore(Path(data_dir) if data_dir else None)
-    catalogue = Catalogue()
+    catalogue = Catalogue(store.data_dir / "catalogue.json", store.load())
     favourites = Favourites(store.data_dir)
     runtime = RuntimeState(favourites)
     kiosk_url_file = Path(
@@ -143,7 +195,9 @@ def create_app(test_config: dict | None = None) -> Flask:
         previous = store.load()
         config = validate(request.get_json(force=True), previous)
         store.save(config)
-        catalogue.invalidate()
+        source_changed = Catalogue._key(previous) != Catalogue._key(config)
+        if source_changed:
+            catalogue.invalidate(clear=True)
         runtime.next()
         bridge.publish_state()
         return jsonify({"ok": True, "config": config.public()})

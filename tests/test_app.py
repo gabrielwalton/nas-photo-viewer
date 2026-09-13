@@ -72,6 +72,23 @@ def test_local_catalogue_obeys_media_limit(tmp_path, monkeypatch):
     assert client.post("/api/refresh").json["count"] == 2
 
 
+def test_catalogue_survives_application_restart(tmp_path):
+    photos = tmp_path / "photos"
+    data = tmp_path / "data"
+    photos.mkdir()
+    (photos / "cached.jpg").write_bytes(b"photo")
+    first = create_app({"TESTING": True, "PHOTO_VIEWER_DATA_DIR": str(data)})
+    first_client = first.test_client()
+    first_client.put(
+        "/api/config", json={"source_type": "local", "local_path": str(photos)}
+    )
+    assert first_client.post("/api/refresh").json["count"] == 1
+    assert (data / "catalogue.json").exists()
+
+    second = create_app({"TESTING": True, "PHOTO_VIEWER_DATA_DIR": str(data)})
+    assert second.test_client().get("/api/status").json["count"] == 1
+
+
 def test_runtime_accepts_current_item_and_favourite(tmp_path):
     app = create_app({"TESTING": True, "PHOTO_VIEWER_DATA_DIR": str(tmp_path)})
     client = app.test_client()

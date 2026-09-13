@@ -4,6 +4,7 @@ import json
 import os
 import re
 import socket
+import threading
 from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
@@ -61,6 +62,7 @@ class MqttBridge:
         self.count = 0
         self.error = ""
         self.folder_options = [""]
+        self.refresh_lock = threading.Lock()
 
     def start(self) -> None:
         if not self.host:
@@ -81,9 +83,27 @@ class MqttBridge:
         if reason_code != 0:
             return
         client.subscribe(f"{self.base}/command/#")
-        self.count, self.error, self.folder_options = self.refresh_catalogue()
+        current_folder = self.store.load().base_folder
+        self.folder_options = [current_folder] if current_folder else [""]
         self.publish_discovery()
         self.publish_state()
+        self._refresh_async()
+
+    def _refresh_async(self) -> None:
+        if not self.refresh_lock.acquire(blocking=False):
+            return
+
+        def worker() -> None:
+            try:
+                self.count, self.error, self.folder_options = (
+                    self.refresh_catalogue()
+                )
+                self.publish_discovery()
+                self.publish_state()
+            finally:
+                self.refresh_lock.release()
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _on_message(self, _client, _userdata, message) -> None:
         command = message.topic.rsplit("/", 1)[-1]
@@ -108,8 +128,7 @@ class MqttBridge:
             elif command == "cancel_delete":
                 self.runtime.cancel_delete()
             elif command == "refresh":
-                self.count, self.error, self.folder_options = self.refresh_catalogue()
-                self.publish_discovery()
+                self._refresh_async()
                 self.runtime.next()
             elif command in {
                 "interval",
@@ -142,7 +161,8 @@ class MqttBridge:
         }[command]
         raw[key] = "" if command == "folder" and value == "/" else value
         self.store.save(validate(raw, current))
-        self.count, self.error, self.folder_options = self.refresh_catalogue()
+        if command == "folder":
+            self._refresh_async()
 
     def publish_discovery(self) -> None:
         if not self.client:
@@ -153,7 +173,7 @@ class MqttBridge:
             "name": self.device_name,
             "manufacturer": "Managed Pi",
             "model": "NAS Photo Viewer",
-            "sw_version": "0.5.1",
+            "sw_version": "0.6.0",
         }
         state = f"{self.base}/state"
         definitions = {
