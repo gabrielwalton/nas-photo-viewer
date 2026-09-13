@@ -10,7 +10,7 @@ from .config import ConfigError, ViewerConfig, clean_relative
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".avif"}
 VIDEO_SUFFIXES = {".mp4", ".m4v", ".mov", ".webm", ".ogv", ".ogg"}
 MEDIA_SUFFIXES = IMAGE_SUFFIXES | VIDEO_SUFFIXES
-MAX_ITEMS = 20_000
+MAX_ITEMS = 100_000
 MAX_FOLDERS = 500
 
 
@@ -144,6 +144,8 @@ class SmbSource:
             if len(result) >= MAX_ITEMS:
                 return
             for entry in self.smbclient.scandir(self._unc(relative)):
+                if len(result) >= MAX_ITEMS:
+                    return
                 child = f"{relative}/{entry.name}".strip("/")
                 if entry.is_dir() and not entry.name.startswith("."):
                     walk(child)
@@ -152,8 +154,6 @@ class SmbSource:
                     and Path(entry.name).suffix.lower() in MEDIA_SUFFIXES
                 ):
                     result.append(MediaItem(child, entry.name, _kind(entry.name)))
-                    if len(result) >= MAX_ITEMS:
-                        return
 
         walk(self.base_folder)
         return result

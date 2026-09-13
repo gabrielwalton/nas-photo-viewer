@@ -41,6 +41,20 @@ def test_video_is_catalogued_and_supports_byte_ranges(tmp_path, monkeypatch):
     assert response.headers["Content-Range"] == "bytes 2-5/10"
 
 
+def test_local_catalogue_obeys_media_limit(tmp_path, monkeypatch):
+    monkeypatch.setattr("photo_viewer.sources.MAX_ITEMS", 2)
+    photos = tmp_path / "photos"
+    nested = photos / "nested"
+    nested.mkdir(parents=True)
+    (nested / "one.jpg").write_bytes(b"1")
+    (nested / "two.jpg").write_bytes(b"2")
+    (photos / "three.jpg").write_bytes(b"3")
+    app = create_app({"TESTING": True, "PHOTO_VIEWER_DATA_DIR": str(tmp_path / "data")})
+    client = app.test_client()
+    client.put("/api/config", json={"source_type": "local", "local_path": str(photos)})
+    assert client.post("/api/refresh").json["count"] == 2
+
+
 def test_runtime_accepts_current_item_and_favourite(tmp_path):
     app = create_app({"TESTING": True, "PHOTO_VIEWER_DATA_DIR": str(tmp_path)})
     client = app.test_client()
