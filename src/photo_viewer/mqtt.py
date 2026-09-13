@@ -41,11 +41,13 @@ class MqttBridge:
         store: ConfigStore,
         runtime: RuntimeState,
         refresh: Callable[[], tuple[int, str, list[str]]],
+        quarantine: Callable[[str], tuple[str, int]],
         display: DisplayController,
     ):
         self.store = store
         self.runtime = runtime
         self.refresh_catalogue = refresh
+        self.quarantine = quarantine
         self.display = display
         self.host = os.getenv("MANAGED_PI_MQTT_HOST", "").strip()
         self.port = int(os.getenv("MANAGED_PI_MQTT_PORT", "1883"))
@@ -93,6 +95,18 @@ class MqttBridge:
                 self.runtime.next()
             elif command == "favourite":
                 self.runtime.favourite_current()
+            elif command == "request_delete":
+                if not self.runtime.request_delete_current():
+                    raise RuntimeError("There is no current item to delete")
+            elif command == "confirm_delete":
+                path = self.runtime.confirm_delete_current()
+                if not path:
+                    raise RuntimeError(
+                        "Deletion was not confirmed in time or the item changed"
+                    )
+                _destination, self.count = self.quarantine(path)
+            elif command == "cancel_delete":
+                self.runtime.cancel_delete()
             elif command == "refresh":
                 self.count, self.error, self.folder_options = self.refresh_catalogue()
                 self.publish_discovery()
@@ -139,7 +153,7 @@ class MqttBridge:
             "name": self.device_name,
             "manufacturer": "Managed Pi",
             "model": "NAS Photo Viewer",
-            "sw_version": "0.4.0",
+            "sw_version": "0.5.0",
         }
         state = f"{self.base}/state"
         definitions = {
@@ -163,6 +177,24 @@ class MqttBridge:
                 "command_topic": f"{self.base}/command/favourite",
                 "payload_press": "PRESS",
                 "icon": "mdi:heart",
+            },
+            ("button", "request_delete_item"): {
+                "name": "Delete item",
+                "command_topic": f"{self.base}/command/request_delete",
+                "payload_press": "PRESS",
+                "icon": "mdi:delete-alert",
+            },
+            ("button", "confirm_delete_item"): {
+                "name": "Confirm delete item",
+                "command_topic": f"{self.base}/command/confirm_delete",
+                "payload_press": "CONFIRM",
+                "icon": "mdi:delete-check",
+            },
+            ("button", "cancel_delete_item"): {
+                "name": "Cancel delete",
+                "command_topic": f"{self.base}/command/cancel_delete",
+                "payload_press": "CANCEL",
+                "icon": "mdi:delete-off",
             },
             ("button", "refresh_library"): {
                 "name": "Refresh library",
@@ -260,6 +292,21 @@ class MqttBridge:
                 "state_topic": state,
                 "value_template": "{{ value_json.status }}",
                 "icon": "mdi:television-play",
+            },
+            ("binary_sensor", "delete_pending"): {
+                "name": "Delete confirmation pending",
+                "state_topic": state,
+                "value_template": "{{ 'ON' if value_json.delete_pending else 'OFF' }}",
+                "payload_on": "ON",
+                "payload_off": "OFF",
+                "device_class": "problem",
+                "icon": "mdi:delete-clock",
+            },
+            ("sensor", "delete_pending_item"): {
+                "name": "Item awaiting deletion",
+                "state_topic": state,
+                "value_template": "{{ value_json.delete_pending_name }}",
+                "icon": "mdi:file-question",
             },
         }
         for (component, object_id), payload in definitions.items():

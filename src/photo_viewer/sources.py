@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import mimetypes
+import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, Protocol
@@ -12,6 +14,7 @@ VIDEO_SUFFIXES = {".mp4", ".m4v", ".mov", ".webm", ".ogv", ".ogg"}
 MEDIA_SUFFIXES = IMAGE_SUFFIXES | VIDEO_SUFFIXES
 MAX_ITEMS = 100_000
 MAX_FOLDERS = 500
+QUARANTINE_FOLDER = "_PhotoViewerDeleted"
 
 
 @dataclass(frozen=True)
@@ -29,6 +32,8 @@ class MediaSource(Protocol):
     def media(self) -> list[MediaItem]: ...
 
     def open(self, relative: str) -> tuple[BinaryIO, str, int]: ...
+
+    def quarantine(self, relative: str) -> str: ...
 
 
 def _kind(name: str) -> str:
@@ -75,8 +80,10 @@ class LocalSource:
             raise ConfigError(f"Media folder does not exist: {self.base}")
         result = []
         for entry in self.base.rglob("*"):
+            relative = entry.relative_to(self.root).as_posix()
+            if QUARANTINE_FOLDER in entry.relative_to(self.root).parts:
+                continue
             if entry.is_file() and entry.suffix.lower() in MEDIA_SUFFIXES:
-                relative = entry.relative_to(self.root).as_posix()
                 result.append(MediaItem(relative, entry.name, _kind(entry.name)))
                 if len(result) >= MAX_ITEMS:
                     break
@@ -90,6 +97,17 @@ class LocalSource:
             mimetypes.guess_type(path.name)[0] or "application/octet-stream",
             path.stat().st_size,
         )
+
+    def quarantine(self, relative: str) -> str:
+        source = self._resolve(relative)
+        destination = self.root / QUARANTINE_FOLDER / clean_relative(relative)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists():
+            destination = destination.with_name(
+                f"{destination.stem}-{os.getpid()}-{time.time_ns()}{destination.suffix}"
+            )
+        os.replace(source, destination)
+        return destination.relative_to(self.root).as_posix()
 
 
 class SmbSource:
@@ -147,6 +165,8 @@ class SmbSource:
                 if len(result) >= MAX_ITEMS:
                     return
                 child = f"{relative}/{entry.name}".strip("/")
+                if entry.is_dir() and entry.name == QUARANTINE_FOLDER:
+                    continue
                 if entry.is_dir() and not entry.name.startswith("."):
                     walk(child)
                 elif (
@@ -165,6 +185,23 @@ class SmbSource:
         stream = self.smbclient.open_file(path, mode="rb")
         mime = mimetypes.guess_type(relative)[0] or "application/octet-stream"
         return stream, mime, self.smbclient.stat(path).st_size
+
+    def quarantine(self, relative: str) -> str:
+        source = self._unc(relative)
+        destination_relative = f"{QUARANTINE_FOLDER}/{clean_relative(relative)}"
+        destination = self._unc(destination_relative)
+        parent = destination.rsplit("\\", 1)[0]
+        self.smbclient.makedirs(parent, exist_ok=True)
+        if self.smbclient.path.exists(destination):
+            path = Path(destination_relative)
+            destination_relative = str(
+                path.with_name(
+                    f"{path.stem}-{os.getpid()}-{time.time_ns()}{path.suffix}"
+                )
+            ).replace("\\", "/")
+            destination = self._unc(destination_relative)
+        self.smbclient.rename(source, destination)
+        return destination_relative
 
 
 def make_source(config: ViewerConfig) -> MediaSource:

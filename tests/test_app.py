@@ -88,6 +88,31 @@ def test_runtime_accepts_current_item_and_favourite(tmp_path):
     assert state["favourite"] is True
 
 
+def test_delete_requires_confirmation_and_moves_item_to_quarantine(tmp_path):
+    photos = tmp_path / "photos"
+    photos.mkdir()
+    original = photos / "family.jpg"
+    original.write_bytes(b"photo")
+    app = create_app({"TESTING": True, "PHOTO_VIEWER_DATA_DIR": str(tmp_path / "data")})
+    client = app.test_client()
+    client.put("/api/config", json={"source_type": "local", "local_path": str(photos)})
+    client.get("/api/next")
+    client.post(
+        "/api/current",
+        json={"path": "family.jpg", "name": "family.jpg", "kind": "image"},
+    )
+    assert client.post("/api/delete/confirm").status_code == 409
+    assert original.exists()
+    assert client.post("/api/delete/request").json["delete_pending"] is True
+    assert client.get("/api/runtime").json["paused"] is True
+    response = client.post("/api/delete/confirm")
+    assert response.status_code == 200
+    assert not original.exists()
+    assert (photos / "_PhotoViewerDeleted" / "family.jpg").exists()
+    assert client.get("/api/status").json["count"] == 0
+    assert client.get("/api/runtime").json["paused"] is False
+
+
 def test_display_mode_writes_url_and_returns_to_photos(tmp_path):
     restarts = []
     app = create_app(

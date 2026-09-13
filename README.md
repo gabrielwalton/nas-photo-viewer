@@ -20,6 +20,8 @@ from a local directory or an SMB share on a NAS.
 - Switch the HDMI output between the slideshow and a Home Assistant dashboard,
   with an optional timed return to photos.
 - Keep a persistent favourites list on the Pi.
+- Protect deletion with a two-command confirmation window, then move the item
+  into `_PhotoViewerDeleted` on the NAS instead of erasing it permanently.
 - Keep NAS credentials only in the Pi's persistent data directory.
 - Stay healthy while unconfigured so initial Managed Pi deployment succeeds.
 

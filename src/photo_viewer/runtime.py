@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from pathlib import Path
 
 
@@ -45,9 +46,25 @@ class RuntimeState:
         self.current_name = ""
         self.current_kind = ""
         self.display_mode = "photos"
+        self.delete_path = ""
+        self.delete_name = ""
+        self.delete_expires_at = 0.0
+        self.delete_previous_paused = False
+
+    def _clear_delete_locked(self) -> None:
+        self.delete_path = ""
+        self.delete_name = ""
+        self.delete_expires_at = 0.0
+        self.paused = self.delete_previous_paused
+        self.delete_previous_paused = False
 
     def snapshot(self) -> dict:
         with self.lock:
+            pending = bool(
+                self.delete_path and time.monotonic() < self.delete_expires_at
+            )
+            if self.delete_path and not pending:
+                self._clear_delete_locked()
             return {
                 "paused": self.paused,
                 "command_sequence": self.command_sequence,
@@ -56,6 +73,8 @@ class RuntimeState:
                 "current_kind": self.current_kind,
                 "favourite": self.favourites.contains(self.current_path),
                 "display_mode": self.display_mode,
+                "delete_pending": pending,
+                "delete_pending_name": self.delete_name if pending else "",
             }
 
     def set_current(self, path: str, name: str, kind: str) -> None:
@@ -80,3 +99,29 @@ class RuntimeState:
         with self.lock:
             path = self.current_path
         return self.favourites.add(path)
+
+    def request_delete_current(self, seconds: int = 30) -> bool:
+        with self.lock:
+            if not self.current_path:
+                return False
+            self.delete_path = self.current_path
+            self.delete_name = self.current_name
+            self.delete_expires_at = time.monotonic() + seconds
+            self.delete_previous_paused = self.paused
+            self.paused = True
+            return True
+
+    def confirm_delete_current(self) -> str:
+        with self.lock:
+            valid = (
+                self.delete_path
+                and self.delete_path == self.current_path
+                and time.monotonic() < self.delete_expires_at
+            )
+            path = self.delete_path if valid else ""
+            self._clear_delete_locked()
+            return path
+
+    def cancel_delete(self) -> None:
+        with self.lock:
+            self._clear_delete_locked()

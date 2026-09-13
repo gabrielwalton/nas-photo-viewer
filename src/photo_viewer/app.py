@@ -46,6 +46,11 @@ class Catalogue:
     def invalidate(self) -> None:
         self.loaded_at = 0.0
 
+    def remove(self, path: str) -> int:
+        with self.lock:
+            self.items = [item for item in self.items if item.path != path]
+            return len(self.items)
+
 
 def encode_path(path: str) -> str:
     return base64.urlsafe_b64encode(path.encode()).decode().rstrip("=")
@@ -99,7 +104,13 @@ def create_app(test_config: dict | None = None) -> Flask:
             folders = [store.load().base_folder]
         return len(items), catalogue.error, folders
 
-    bridge = MqttBridge(store, runtime, refresh_for_mqtt, display)
+    def quarantine(path: str) -> tuple[str, int]:
+        destination = make_source(store.load()).quarantine(path)
+        count = catalogue.remove(path)
+        runtime.next()
+        return destination, count
+
+    bridge = MqttBridge(store, runtime, refresh_for_mqtt, quarantine, display)
 
     def display_changed() -> None:
         runtime.set_display_mode(display.mode)
@@ -278,6 +289,33 @@ def create_app(test_config: dict | None = None) -> Flask:
         saved = runtime.favourite_current()
         bridge.publish_state()
         return jsonify({"ok": saved})
+
+    @app.post("/api/delete/request")
+    def request_delete():
+        pending = runtime.request_delete_current()
+        bridge.publish_state()
+        return jsonify({"ok": pending, "delete_pending": pending})
+
+    @app.post("/api/delete/confirm")
+    def confirm_delete():
+        path = runtime.confirm_delete_current()
+        if not path:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "Deletion was not confirmed in time or the item changed",
+                }
+            ), 409
+        destination, count = quarantine(path)
+        bridge.count = count
+        bridge.publish_state()
+        return jsonify({"ok": True, "moved_to": destination})
+
+    @app.post("/api/delete/cancel")
+    def cancel_delete():
+        runtime.cancel_delete()
+        bridge.publish_state()
+        return jsonify({"ok": True})
 
     @app.get("/media/<token>")
     def media(token: str):
