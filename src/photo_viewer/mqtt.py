@@ -44,12 +44,14 @@ class MqttBridge:
         refresh: Callable[[], tuple[int, str, list[str]]],
         quarantine: Callable[[str], tuple[str, int]],
         display: DisplayController,
+        source_changed: Callable[[], None],
     ):
         self.store = store
         self.runtime = runtime
         self.refresh_catalogue = refresh
         self.quarantine = quarantine
         self.display = display
+        self.source_changed = source_changed
         self.host = os.getenv("MANAGED_PI_MQTT_HOST", "").strip()
         self.port = int(os.getenv("MANAGED_PI_MQTT_PORT", "1883"))
         self.device_id = device_id()
@@ -62,7 +64,9 @@ class MqttBridge:
         self.count = 0
         self.error = ""
         self.folder_options = [""]
-        self.refresh_lock = threading.Lock()
+        self.refresh_guard = threading.Lock()
+        self.refresh_running = False
+        self.refresh_pending = False
 
     def start(self) -> None:
         if not self.host:
@@ -90,18 +94,25 @@ class MqttBridge:
         self._refresh_async()
 
     def _refresh_async(self) -> None:
-        if not self.refresh_lock.acquire(blocking=False):
-            return
+        with self.refresh_guard:
+            if self.refresh_running:
+                self.refresh_pending = True
+                return
+            self.refresh_running = True
 
         def worker() -> None:
-            try:
+            while True:
                 self.count, self.error, self.folder_options = (
                     self.refresh_catalogue()
                 )
                 self.publish_discovery()
                 self.publish_state()
-            finally:
-                self.refresh_lock.release()
+                with self.refresh_guard:
+                    if self.refresh_pending:
+                        self.refresh_pending = False
+                        continue
+                    self.refresh_running = False
+                    break
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -162,6 +173,7 @@ class MqttBridge:
         raw[key] = "" if command == "folder" and value == "/" else value
         self.store.save(validate(raw, current))
         if command == "folder":
+            self.source_changed()
             self._refresh_async()
 
     def publish_discovery(self) -> None:
@@ -173,7 +185,7 @@ class MqttBridge:
             "name": self.device_name,
             "manufacturer": "Managed Pi",
             "model": "NAS Photo Viewer",
-            "sw_version": "0.6.0",
+            "sw_version": "0.6.1",
         }
         state = f"{self.base}/state"
         definitions = {

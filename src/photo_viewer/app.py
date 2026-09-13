@@ -75,6 +75,9 @@ class Catalogue:
         try:
             config = store.load()
             items = make_source(config).media()
+            if self._key(config) != self._key(store.load()):
+                with self.lock:
+                    return self.items
             with self.lock:
                 self.items = items
                 self.error = ""
@@ -162,7 +165,14 @@ def create_app(test_config: dict | None = None) -> Flask:
         runtime.next()
         return destination, count
 
-    bridge = MqttBridge(store, runtime, refresh_for_mqtt, quarantine, display)
+    bridge = MqttBridge(
+        store,
+        runtime,
+        refresh_for_mqtt,
+        quarantine,
+        display,
+        lambda: catalogue.invalidate(clear=True),
+    )
 
     def display_changed() -> None:
         runtime.set_display_mode(display.mode)
