@@ -89,6 +89,8 @@ async function showNext() {
     const item = await json(`/api/next?after=${encodeURIComponent(currentPath)}`);
     if (item.kind === 'video') {
       photos.forEach(photo => photo.classList.remove('active'));
+      video.muted = false;
+      video.volume = 1;
       video.style.objectFit = item.fit_mode;
       video.style.transitionDuration = `${item.transition_seconds}s`;
       video.src = item.url;

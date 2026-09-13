@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import random
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -195,6 +196,45 @@ def create_app(test_config: dict | None = None) -> Flask:
     @app.get("/api/health")
     def health():
         return jsonify({"ok": True})
+
+    @app.get("/api/diagnostics/audio")
+    def audio_diagnostics():
+        proc = {}
+        for name in ("cards", "devices", "pcm"):
+            path = Path("/proc/asound") / name
+            try:
+                proc[name] = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                proc[name] = ""
+        eld = {}
+        for path in Path("/proc/asound").glob("card*/eld*"):
+            try:
+                eld[str(path)] = path.read_text(
+                    encoding="utf-8", errors="replace"
+                )
+            except OSError:
+                pass
+        sound_devices = []
+        for path in Path("/dev/snd").glob("*"):
+            sound_devices.append(
+                {
+                    "name": path.name,
+                    "readable": os.access(path, os.R_OK),
+                    "writable": os.access(path, os.W_OK),
+                }
+            )
+        return jsonify(
+            {
+                "ok": True,
+                "proc_asound": proc,
+                "hdmi_eld": eld,
+                "sound_devices": sound_devices,
+                "commands": {
+                    command: bool(shutil.which(command))
+                    for command in ("aplay", "pactl", "wpctl", "pw-cli")
+                },
+            }
+        )
 
     @app.get("/api/config")
     def get_config():
