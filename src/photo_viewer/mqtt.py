@@ -130,11 +130,9 @@ class MqttBridge:
                 "name": "Pause slideshow",
                 "command_topic": f"{self.base}/command/pause",
                 "state_topic": state,
-                "value_template": "{{ value_json.paused }}",
+                "value_template": "{{ 'ON' if value_json.paused else 'OFF' }}",
                 "payload_on": "ON",
                 "payload_off": "OFF",
-                "state_on": "true",
-                "state_off": "false",
                 "icon": "mdi:pause-circle",
             },
             ("button", "next_item"): {
