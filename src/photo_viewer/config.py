@@ -108,7 +108,29 @@ class ConfigStore:
 
     def load(self) -> ViewerConfig:
         if not self.path.exists():
-            return ViewerConfig()
+            environment = {
+                "source_type": os.environ.get("PHOTO_VIEWER_SOURCE_TYPE", "local"),
+                "local_path": os.environ.get(
+                    "PHOTO_VIEWER_LOCAL_PATH", "/opt/managed-pi/data/photos"
+                ),
+                "smb_server": os.environ.get("PHOTO_VIEWER_SMB_SERVER", ""),
+                "smb_share": os.environ.get("PHOTO_VIEWER_SMB_SHARE", ""),
+                "smb_username": os.environ.get("PHOTO_VIEWER_SMB_USERNAME", ""),
+                "smb_password": os.environ.get("PHOTO_VIEWER_SMB_PASSWORD", ""),
+                "base_folder": os.environ.get("PHOTO_VIEWER_BASE_FOLDER", ""),
+                "interval_seconds": os.environ.get(
+                    "PHOTO_VIEWER_INTERVAL_SECONDS", "20"
+                ),
+                "fit_mode": os.environ.get("PHOTO_VIEWER_FIT_MODE", "contain"),
+                "transition_seconds": os.environ.get(
+                    "PHOTO_VIEWER_TRANSITION_SECONDS", "1"
+                ),
+                "dashboard_url": os.environ.get("PHOTO_VIEWER_DASHBOARD_URL", ""),
+                "dashboard_return_minutes": os.environ.get(
+                    "PHOTO_VIEWER_DASHBOARD_RETURN_MINUTES", "0"
+                ),
+            }
+            return validate(environment)
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
             return validate(raw)

@@ -38,3 +38,10 @@ Dashboard switching requires Managed Pi Base v0.3.1 or later. The application
 always restores photo mode when it starts; its background MQTT connection stays
 online while Chromium displays Home Assistant, so Home Assistant can switch the
 same HDMI output back to the slideshow.
+
+A fresh Managed Pi can be fully preconfigured by adding `PHOTO_VIEWER_SOURCE_TYPE`,
+`PHOTO_VIEWER_SMB_SERVER`, `PHOTO_VIEWER_SMB_SHARE`,
+`PHOTO_VIEWER_SMB_USERNAME`, `PHOTO_VIEWER_SMB_PASSWORD`,
+`PHOTO_VIEWER_BASE_FOLDER` and `PHOTO_VIEWER_DASHBOARD_URL` to its private
+`managed-pi.env` provisioning file. Settings subsequently changed through Home
+Assistant are saved on the Pi and take precedence over these initial values.
