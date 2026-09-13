@@ -19,3 +19,16 @@ jobs:
       - run: python -m pip install -e ".[test]"
       - run: ruff check .
       - run: pytest -q
+      - name: Smoke test the production server entry point
+        run: |
+          export PHOTO_VIEWER_DATA_DIR="$RUNNER_TEMP/photo-viewer-data"
+          export PHOTO_VIEWER_HOST=127.0.0.1
+          export PHOTO_VIEWER_PORT=18080
+          python -m photo_viewer.server &
+          server_pid=$!
+          trap 'kill "$server_pid"' EXIT
+          for attempt in 1 2 3 4 5; do
+            curl --fail --silent http://127.0.0.1:18080/api/health && exit 0
+            sleep 1
+          done
+          exit 1
