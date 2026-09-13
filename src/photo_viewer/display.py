@@ -21,7 +21,9 @@ class DisplayController:
         self.terminate_browser = terminate_browser or self._terminate_browser
         self.lock = threading.Lock()
         self.mode = "photos"
-        self.timer: threading.Timer | None = None
+        self.return_timer: threading.Timer | None = None
+        self.sleep_timer: threading.Timer | None = None
+        self.sleep_minutes = 0
         self.on_change: Callable[[], None] | None = None
 
     @staticmethod
@@ -47,13 +49,36 @@ class DisplayController:
     def set_change_callback(self, callback: Callable[[], None]) -> None:
         self.on_change = callback
 
-    def reset_to_photos(self) -> None:
-        self._set("photos", self.local_url, 0, restart=False)
+    def reset_to_photos(self, sleep_minutes: int = 0) -> None:
+        self._set("photos", self.local_url, 0, sleep_minutes, restart=False)
 
-    def show(self, mode: str, dashboard_url: str, return_minutes: int = 0) -> None:
+    def reschedule_sleep(self, sleep_minutes: int) -> None:
+        """Apply a changed sleep timeout without restarting the browser."""
+        with self.lock:
+            if self.sleep_timer:
+                self.sleep_timer.cancel()
+            self.sleep_timer = None
+            self.sleep_minutes = sleep_minutes
+            if self.mode != "sleep" and sleep_minutes > 0:
+                self.sleep_timer = threading.Timer(
+                    sleep_minutes * 60,
+                    self._automatic_sleep,
+                )
+                self.sleep_timer.daemon = True
+                self.sleep_timer.start()
+
+    def show(
+        self,
+        mode: str,
+        dashboard_url: str,
+        return_minutes: int = 0,
+        sleep_minutes: int = 0,
+    ) -> None:
         mode = mode.strip().lower()
-        if mode not in {"photos", "collage", "dashboard"}:
-            raise ValueError("Display mode must be photos, collage or dashboard")
+        if mode not in {"photos", "collage", "dashboard", "sleep"}:
+            raise ValueError(
+                "Display mode must be photos, collage, dashboard or sleep"
+            )
         if mode == "dashboard":
             if not self.supported:
                 raise RuntimeError(
@@ -61,31 +86,57 @@ class DisplayController:
                 )
             if not dashboard_url.startswith(("http://", "https://")):
                 raise ValueError("Set a valid Home Assistant dashboard URL first")
-            self._set(mode, dashboard_url, return_minutes, restart=True)
+            self._set(
+                mode, dashboard_url, return_minutes, sleep_minutes, restart=True
+            )
         else:
-            self._set(mode, self.local_url, 0, restart=True)
+            self._set(mode, self.local_url, 0, sleep_minutes, restart=True)
 
-    def _set(self, mode: str, url: str, return_minutes: int, restart: bool) -> None:
+    def _set(
+        self,
+        mode: str,
+        url: str,
+        return_minutes: int,
+        sleep_minutes: int,
+        restart: bool,
+    ) -> None:
         with self.lock:
-            if self.timer:
-                self.timer.cancel()
-                self.timer = None
+            for timer in (self.return_timer, self.sleep_timer):
+                if timer:
+                    timer.cancel()
+            self.return_timer = None
+            self.sleep_timer = None
+            self.sleep_minutes = sleep_minutes
             self.url_file.parent.mkdir(parents=True, exist_ok=True)
             temporary = self.url_file.with_suffix(".tmp")
             temporary.write_text(url + "\n", encoding="utf-8")
             os.replace(temporary, self.url_file)
             self.mode = mode
             if mode == "dashboard" and return_minutes > 0:
-                self.timer = threading.Timer(
+                self.return_timer = threading.Timer(
                     return_minutes * 60,
                     self._automatic_return,
                 )
-                self.timer.daemon = True
-                self.timer.start()
+                self.return_timer.daemon = True
+                self.return_timer.start()
+            if mode != "sleep" and sleep_minutes > 0:
+                self.sleep_timer = threading.Timer(
+                    sleep_minutes * 60,
+                    self._automatic_sleep,
+                )
+                self.sleep_timer.daemon = True
+                self.sleep_timer.start()
         if restart:
             self.terminate_browser()
 
     def _automatic_return(self) -> None:
-        self._set("photos", self.local_url, 0, restart=True)
+        self._set(
+            "photos", self.local_url, 0, self.sleep_minutes, restart=True
+        )
+        if self.on_change:
+            self.on_change()
+
+    def _automatic_sleep(self) -> None:
+        self._set("sleep", self.local_url, 0, 0, restart=True)
         if self.on_change:
             self.on_change()

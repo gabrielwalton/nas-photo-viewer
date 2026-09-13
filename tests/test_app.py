@@ -62,6 +62,45 @@ def test_video_is_catalogued_and_supports_byte_ranges(tmp_path, monkeypatch):
     assert response.headers["Content-Range"] == "bytes 2-5/10"
 
 
+def test_date_folder_filter_supports_year_and_month(tmp_path):
+    photos = tmp_path / "photos"
+    june = photos / "01-06-2018"
+    july = photos / "14-07-2018"
+    older = photos / "02-06-2017"
+    for folder in (june, july, older):
+        folder.mkdir(parents=True)
+        (folder / "photo.jpg").write_bytes(b"photo")
+    app = create_app({"TESTING": True, "PHOTO_VIEWER_DATA_DIR": str(tmp_path / "data")})
+    client = app.test_client()
+    client.put(
+        "/api/config",
+        json={
+            "source_type": "local",
+            "local_path": str(photos),
+            "date_year": 2018,
+            "date_month": 6,
+        },
+    )
+
+    assert client.post("/api/refresh").json["count"] == 1
+    assert "01-06-2018" in client.get("/api/next").json["path"]
+
+
+def test_skip_back_returns_previous_random_item(tmp_path):
+    photos = tmp_path / "photos"
+    photos.mkdir()
+    for name in ("one.jpg", "two.jpg", "three.jpg"):
+        (photos / name).write_bytes(b"photo")
+    app = create_app({"TESTING": True, "PHOTO_VIEWER_DATA_DIR": str(tmp_path / "data")})
+    client = app.test_client()
+    client.put("/api/config", json={"source_type": "local", "local_path": str(photos)})
+    first = client.get("/api/next").json["path"]
+    second = client.get("/api/next").json["path"]
+
+    assert second != first
+    assert client.get("/api/next?direction=previous").json["path"] == first
+
+
 def test_collage_returns_unique_images_and_excludes_videos(tmp_path):
     photos = tmp_path / "photos"
     photos.mkdir()
@@ -126,6 +165,20 @@ def test_runtime_accepts_current_item_and_favourite(tmp_path):
     assert state["favourite"] is True
 
 
+def test_rotation_is_remembered(tmp_path):
+    app = create_app({"TESTING": True, "PHOTO_VIEWER_DATA_DIR": str(tmp_path)})
+    client = app.test_client()
+    client.post(
+        "/api/current",
+        json={"path": "family/photo.jpg", "name": "photo.jpg", "kind": "image"},
+    )
+
+    assert client.post("/api/rotate").json["rotation"] == 90
+    assert client.post("/api/rotate").json["rotation"] == 180
+    assert client.get("/api/runtime").json["rotation"] == 180
+    assert (tmp_path / "rotations.json").exists()
+
+
 def test_delete_requires_confirmation_and_moves_item_to_quarantine(tmp_path):
     photos = tmp_path / "photos"
     photos.mkdir()
@@ -187,3 +240,6 @@ def test_display_mode_writes_url_and_returns_to_photos(tmp_path):
     assert response.json["display_mode"] == "collage"
     assert (tmp_path / "kiosk-url").read_text().strip() == "http://127.0.0.1:8080"
     assert restarts == [True, True, True]
+    response = client.post("/api/display", json={"mode": "sleep"})
+    assert response.json["display_mode"] == "sleep"
+    assert restarts == [True, True, True, True]

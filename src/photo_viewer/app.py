@@ -5,6 +5,7 @@ import json
 import math
 import os
 import random
+import re
 import shutil
 import struct
 import subprocess
@@ -25,7 +26,7 @@ from flask import (
 from .config import ConfigError, ConfigStore, clean_relative, validate
 from .display import DisplayController
 from .mqtt import MqttBridge
-from .runtime import Favourites, RuntimeState
+from .runtime import Favourites, Rotations, RuntimeState
 from .sources import MediaItem, make_source
 
 
@@ -124,6 +125,76 @@ def decode_path(token: str) -> str:
         raise ConfigError("Invalid media identifier") from exc
 
 
+DATE_PATTERNS = (
+    re.compile(r"^(?P<day>\d{1,2})-(?P<month>\d{1,2})-(?P<year>\d{4})$"),
+    re.compile(r"^(?P<year>\d{4})-(?P<month>\d{1,2})-(?P<day>\d{1,2})$"),
+)
+
+
+def media_folder_date(path: str) -> tuple[int, int] | None:
+    for part in Path(path.replace("\\", "/")).parts[:-1]:
+        for pattern in DATE_PATTERNS:
+            match = pattern.fullmatch(part)
+            if not match:
+                continue
+            year = int(match.group("year"))
+            month = int(match.group("month"))
+            day = int(match.group("day"))
+            if 1900 <= year <= 2200 and 1 <= month <= 12 and 1 <= day <= 31:
+                return year, month
+    return None
+
+
+def filter_media(items: list[MediaItem], config) -> list[MediaItem]:
+    if not config.date_year and not config.date_month:
+        return items
+    result = []
+    for item in items:
+        value = media_folder_date(item.path)
+        if not value:
+            continue
+        year, month = value
+        if config.date_year and year != config.date_year:
+            continue
+        if config.date_month and month != config.date_month:
+            continue
+        result.append(item)
+    return result
+
+
+class PlaybackHistory:
+    def __init__(self):
+        self.paths: list[str] = []
+        self.position = -1
+        self.lock = threading.Lock()
+
+    def choose(self, items: list[MediaItem], direction: str = "next") -> MediaItem:
+        by_path = {item.path: item for item in items}
+        with self.lock:
+            self.paths = [path for path in self.paths if path in by_path]
+            self.position = min(self.position, len(self.paths) - 1)
+            if direction == "previous" and self.position > 0:
+                self.position -= 1
+                return by_path[self.paths[self.position]]
+            if direction == "previous" and self.position >= 0:
+                return by_path[self.paths[self.position]]
+            if direction == "next" and self.position + 1 < len(self.paths):
+                self.position += 1
+                return by_path[self.paths[self.position]]
+            current = self.paths[self.position] if self.position >= 0 else ""
+            choices = [item for item in items if item.path != current] or items
+            item = random.SystemRandom().choice(choices)
+            self.paths = self.paths[: self.position + 1]
+            self.paths.append(item.path)
+            self.position = len(self.paths) - 1
+            return item
+
+    def clear(self) -> None:
+        with self.lock:
+            self.paths = []
+            self.position = -1
+
+
 def create_app(test_config: dict | None = None) -> Flask:
     app = Flask(__name__)
     if test_config:
@@ -132,7 +203,9 @@ def create_app(test_config: dict | None = None) -> Flask:
     store = ConfigStore(Path(data_dir) if data_dir else None)
     catalogue = Catalogue(store.data_dir / "catalogue.json", store.load())
     favourites = Favourites(store.data_dir)
-    runtime = RuntimeState(favourites)
+    rotations = Rotations(store.data_dir)
+    runtime = RuntimeState(favourites, rotations)
+    history = PlaybackHistory()
     kiosk_url_file = Path(
         app.config.get(
             "PHOTO_VIEWER_KIOSK_URL_FILE",
@@ -154,21 +227,31 @@ def create_app(test_config: dict | None = None) -> Flask:
         ),
         terminate_browser=app.config.get("PHOTO_VIEWER_TERMINATE_BROWSER"),
     )
-    display.reset_to_photos()
+    display.reset_to_photos(store.load().sleep_minutes)
 
-    def refresh_for_mqtt() -> tuple[int, str, list[str]]:
-        items = catalogue.refresh(store, force=True)
+    def refresh_for_mqtt() -> tuple[int, str, list[str], list[str]]:
+        items = catalogue.refresh(store)
+        config = store.load()
+        filtered = filter_media(items, config)
+        years = sorted(
+            {str(value[0]) for item in items if (value := media_folder_date(item.path))}
+        )
         try:
-            folders = make_source(store.load()).folder_options()
+            folders = make_source(config).folder_options()
         except Exception:
-            folders = [store.load().base_folder]
-        return len(items), catalogue.error, folders
+            folders = [config.base_folder]
+        return len(filtered), catalogue.error, folders, years
 
     def quarantine(path: str) -> tuple[str, int]:
         destination = make_source(store.load()).quarantine(path)
-        count = catalogue.remove(path)
+        catalogue.remove(path)
+        count = len(filter_media(catalogue.items, store.load()))
         runtime.next()
         return destination, count
+
+    def source_changed() -> None:
+        catalogue.invalidate(clear=True)
+        history.clear()
 
     bridge = MqttBridge(
         store,
@@ -176,7 +259,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         refresh_for_mqtt,
         quarantine,
         display,
-        lambda: catalogue.invalidate(clear=True),
+        source_changed,
     )
 
     def display_changed() -> None:
@@ -187,6 +270,10 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     @app.errorhandler(ConfigError)
     def config_error(exc):
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+    @app.errorhandler(ValueError)
+    def value_error(exc):
         return jsonify({"ok": False, "error": str(exc)}), 400
 
     @app.errorhandler(OSError)
@@ -293,6 +380,11 @@ def create_app(test_config: dict | None = None) -> Flask:
         source_changed = Catalogue._key(previous) != Catalogue._key(config)
         if source_changed:
             catalogue.invalidate(clear=True)
+        if source_changed or (
+            previous.date_year,
+            previous.date_month,
+        ) != (config.date_year, config.date_month):
+            history.clear()
         runtime.next()
         bridge.publish_state()
         return jsonify({"ok": True, "config": config.public()})
@@ -308,10 +400,19 @@ def create_app(test_config: dict | None = None) -> Flask:
     @app.post("/api/refresh")
     def refresh():
         items = catalogue.refresh(store, force=True)
-        bridge.count = len(items)
+        config = store.load()
+        filtered = filter_media(items, config)
+        bridge.count = len(filtered)
         bridge.error = catalogue.error
         try:
-            bridge.folder_options = make_source(store.load()).folder_options()
+            bridge.folder_options = make_source(config).folder_options()
+            bridge.year_options = sorted(
+                {
+                    str(value[0])
+                    for item in items
+                    if (value := media_folder_date(item.path))
+                }
+            )
             bridge.publish_discovery()
         except Exception:
             pass
@@ -319,7 +420,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         return jsonify(
             {
                 "ok": not catalogue.error,
-                "count": len(items),
+                "count": len(filtered),
                 "error": catalogue.error,
             }
         )
@@ -327,7 +428,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     @app.get("/api/status")
     def status():
         config = store.load()
-        items = catalogue.refresh(store)
+        items = filter_media(catalogue.refresh(store), config)
         bridge.count = len(items)
         bridge.error = catalogue.error
         return jsonify(
@@ -344,21 +445,20 @@ def create_app(test_config: dict | None = None) -> Flask:
     @app.get("/api/next")
     def next_media():
         config = store.load()
-        items = catalogue.refresh(store)
+        items = filter_media(catalogue.refresh(store), config)
         if catalogue.error:
             return jsonify({"ok": False, "error": catalogue.error}), 503
         if not items:
             return jsonify(
                 {"ok": False, "error": "No supported photos or videos found"}
             ), 404
-        after = request.args.get("after", "")
         kind = request.args.get("kind", "")
         eligible = [item for item in items if not kind or item.kind == kind]
         if not eligible:
             message = f"No {kind or 'supported'} media found"
             return jsonify({"ok": False, "error": message}), 404
-        choices = [item for item in eligible if item.path != after] or eligible
-        item = random.SystemRandom().choice(choices)
+        direction = request.args.get("direction", "next")
+        item = history.choose(eligible, direction)
         bridge.publish_state()
         return jsonify(
             {
@@ -370,13 +470,14 @@ def create_app(test_config: dict | None = None) -> Flask:
                 "interval_seconds": config.interval_seconds,
                 "transition_seconds": config.transition_seconds,
                 "fit_mode": config.fit_mode,
+                "rotation": rotations.get(item.path),
             }
         )
 
     @app.get("/api/collage")
     def collage_media():
         config = store.load()
-        items = catalogue.refresh(store)
+        items = filter_media(catalogue.refresh(store), config)
         if catalogue.error:
             return jsonify({"ok": False, "error": catalogue.error}), 503
         images = [item for item in items if item.kind == "image"]
@@ -396,6 +497,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                         "name": item.name,
                         "kind": item.kind,
                         "url": f"/media/{encode_path(item.path)}",
+                        "rotation": rotations.get(item.path),
                     }
                     for item in selected
                 ],
@@ -417,6 +519,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             str(raw.get("mode", "")),
             config.dashboard_url,
             config.dashboard_return_minutes,
+            config.sleep_minutes,
         )
         runtime.set_display_mode(display.mode)
         bridge.publish_state()
@@ -438,6 +541,12 @@ def create_app(test_config: dict | None = None) -> Flask:
         saved = runtime.favourite_current()
         bridge.publish_state()
         return jsonify({"ok": saved})
+
+    @app.post("/api/rotate")
+    def rotate():
+        rotation = runtime.rotate_current()
+        bridge.publish_state()
+        return jsonify({"ok": True, "rotation": rotation})
 
     @app.post("/api/delete/request")
     def request_delete():

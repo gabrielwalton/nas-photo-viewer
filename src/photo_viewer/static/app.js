@@ -15,6 +15,7 @@ let commandSequence = null;
 let loading = false;
 let displayMode = '';
 let collageItems = [];
+let currentRotation = 0;
 
 async function json(url, options) {
   const response = await fetch(url, options);
@@ -80,13 +81,21 @@ async function reportCurrent(item) {
   });
 }
 
-async function showNext() {
+function applyRotation(element, rotation) {
+  const degrees = Number(rotation || 0) % 360;
+  const quarterTurn = Math.abs(degrees) % 180 === 90;
+  const ratio = window.innerWidth / window.innerHeight;
+  const scale = quarterTurn ? Math.min(ratio, 1 / ratio) : 1;
+  element.style.transform = `rotate(${degrees}deg) scale(${scale})`;
+}
+
+async function showNext(direction = 'next') {
   if (loading || displayMode !== 'photos') return;
   loading = true;
   let nextDelay = 0;
   clearTimeout(timer);
   try {
-    const item = await json(`/api/next?after=${encodeURIComponent(currentPath)}`);
+    const item = await json(`/api/next?direction=${encodeURIComponent(direction)}`);
     if (item.kind === 'video') {
       photos.forEach(photo => photo.classList.remove('active'));
       video.muted = false;
@@ -95,7 +104,7 @@ async function showNext() {
       video.style.transitionDuration = `${item.transition_seconds}s`;
       video.src = item.url;
       video.classList.add('active');
-      video.onended = showNext;
+      video.onended = () => showNext();
       video.onerror = () => setTimeout(showNext, 3000);
       if (!paused) await video.play();
     } else {
@@ -106,6 +115,7 @@ async function showNext() {
       const incoming = photos[1 - active];
       incoming.style.objectFit = item.fit_mode;
       incoming.style.transitionDuration = `${item.transition_seconds}s`;
+      applyRotation(incoming, item.rotation);
       await new Promise((resolve, reject) => {
         incoming.onload = resolve;
         incoming.onerror = () => reject(new Error('The selected image could not be displayed'));
@@ -117,6 +127,7 @@ async function showNext() {
       nextDelay = item.interval_seconds * 1000;
     }
     await reportCurrent(item);
+    currentRotation = Number(item.rotation || 0);
     message.classList.add('hidden');
   } catch (error) {
     messageText.textContent = error.message;
@@ -128,17 +139,17 @@ async function showNext() {
   }
 }
 
-function randomTransform() {
+function randomTransform(rotation = 0) {
   const angle = (Math.random() * 8 - 4).toFixed(2);
   const x = (Math.random() * 1.4 - .7).toFixed(2);
   const y = (Math.random() * 1.4 - .7).toFixed(2);
-  return `translate(${x}vw, ${y}vh) rotate(${angle}deg) scale(.96)`;
+  return `translate(${x}vw, ${y}vh) rotate(${Number(rotation) + Number(angle)}deg) scale(.96)`;
 }
 
 async function setCollageTile(tile, item, transitionSeconds) {
   tile.classList.remove('loaded');
   tile.style.transitionDuration = `${transitionSeconds}s`;
-  tile.style.transform = randomTransform();
+  tile.style.transform = randomTransform(item.rotation);
   await new Promise((resolve, reject) => {
     tile.onload = resolve;
     tile.onerror = () => reject(new Error('A collage photo could not be displayed'));
@@ -209,6 +220,13 @@ async function activateMode(mode, force = false) {
   if (!force && displayMode === mode) return;
   clearTimeout(timer);
   displayMode = mode;
+  document.querySelector('#viewer').classList.toggle('sleeping', mode === 'sleep');
+  if (mode === 'sleep') {
+    hideSlideshow();
+    hideCollage();
+    message.classList.add('hidden');
+    return;
+  }
   if (mode === 'collage') {
     hideCollage();
     await showCollage();
@@ -225,9 +243,14 @@ async function syncRuntime() {
     if (state.display_mode !== displayMode) await activateMode(state.display_mode);
     if (commandSequence !== null && state.command_sequence !== commandSequence) {
       if (displayMode === 'collage') await rotateCollageItem();
-      else await showNext();
+      else await showNext(state.navigation || 'next');
     }
     commandSequence = state.command_sequence;
+    if (state.current_path === currentPath && Number(state.rotation) !== currentRotation) {
+      currentRotation = Number(state.rotation || 0);
+      const activePhoto = document.querySelector('.photo.active');
+      if (activePhoto) applyRotation(activePhoto, currentRotation);
+    }
     if (state.paused !== paused) {
       paused = state.paused;
       if (paused) {

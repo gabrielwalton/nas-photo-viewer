@@ -11,6 +11,9 @@ from a local directory or an SMB share on a NAS.
 - Recursively find JPEG, PNG, GIF, WebP, BMP and AVIF images plus MP4, M4V,
   MOV, WebM and Ogg videos.
 - Random playback without immediate repeats.
+- Filter dated folders by year, month, or a month within a selected year.
+- Navigate backward and forward through the random playback history.
+- Remember per-photo clockwise rotation corrections across restarts.
 - Collage mode shows five or six gently rotated photos and replaces one at a
   time, without mixing videos into the collage.
 - Play videos to the end and use the configured timer for still images.
@@ -19,6 +22,9 @@ from a local directory or an SMB share on a NAS.
   status controls to Home Assistant through MQTT Discovery.
 - Switch the HDMI output between the slideshow and a Home Assistant dashboard,
   with an optional timed return to photos.
+- Sleep to a black display manually or after a configurable period; Wake returns
+  to photos and starts a fresh sleep timer.
+- Hide the mouse pointer over the television viewer.
 - Keep a persistent favourites list on the Pi.
 - Protect deletion with a two-command confirmation window, then move the item
   into `_PhotoViewerDeleted` on the NAS instead of erasing it permanently.

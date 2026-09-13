@@ -39,9 +39,14 @@
         <label>Seconds per photo<input name="interval_seconds" type="number" min="3" max="3600"></label>
         <label>Image fit<select name="fit_mode"><option value="contain">Show whole photo</option><option value="cover">Fill the screen</option></select></label>
       </div>
+      <div class="two-columns">
+        <label>Photo year<input name="date_year" type="number" min="0" max="2200"><small>Use 0 for all years.</small></label>
+        <label>Photo month<select name="date_month"><option value="0">All months</option><option value="1">January</option><option value="2">February</option><option value="3">March</option><option value="4">April</option><option value="5">May</option><option value="6">June</option><option value="7">July</option><option value="8">August</option><option value="9">September</option><option value="10">October</option><option value="11">November</option><option value="12">December</option></select></label>
+      </div>
       <label>Fade duration<input name="transition_seconds" type="number" min="0" max="10" step="0.25"></label>
       <label>Home Assistant dashboard URL<input name="dashboard_url" type="url" placeholder="http://homeassistant:8123/dashboard/home?kiosk"></label>
       <label>Return to photos after (minutes)<input name="dashboard_return_minutes" type="number" min="0" max="1440"><small>Use 0 to stay on the dashboard.</small></label>
+      <label>Sleep after (minutes)<input name="sleep_minutes" type="number" min="0" max="1440"><small>Defaults to 120 minutes. Use 0 to disable automatic sleep.</small></label>
       <p id="form-status"></p>
       <footer><button type="button" id="test-button" class="secondary">Save and test</button><button type="submit">Save settings</button></footer>
     </form>

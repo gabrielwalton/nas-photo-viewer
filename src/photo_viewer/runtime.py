@@ -36,12 +36,50 @@ class Favourites:
         return True
 
 
+class Rotations:
+    def __init__(self, data_dir: Path):
+        self.path = data_dir / "rotations.json"
+        self.lock = threading.Lock()
+
+    def _load(self) -> dict[str, int]:
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+            return {str(path): int(value) % 360 for path, value in raw.items()}
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            return {}
+
+    def get(self, path: str) -> int:
+        if not path:
+            return 0
+        with self.lock:
+            return self._load().get(path, 0)
+
+    def rotate_clockwise(self, path: str) -> int:
+        if not path:
+            return 0
+        with self.lock:
+            values = self._load()
+            rotation = (values.get(path, 0) + 90) % 360
+            if rotation:
+                values[path] = rotation
+            else:
+                values.pop(path, None)
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self.path.with_suffix(".tmp")
+            temporary.write_text(json.dumps(values, indent=2) + "\n")
+            os.chmod(temporary, 0o600)
+            os.replace(temporary, self.path)
+            return rotation
+
+
 class RuntimeState:
-    def __init__(self, favourites: Favourites):
+    def __init__(self, favourites: Favourites, rotations: Rotations):
         self.favourites = favourites
+        self.rotations = rotations
         self.lock = threading.Lock()
         self.paused = False
         self.command_sequence = 0
+        self.navigation = "next"
         self.current_path = ""
         self.current_name = ""
         self.current_kind = ""
@@ -68,9 +106,11 @@ class RuntimeState:
             return {
                 "paused": self.paused,
                 "command_sequence": self.command_sequence,
+                "navigation": self.navigation,
                 "current_path": self.current_path,
                 "current_name": self.current_name,
                 "current_kind": self.current_kind,
+                "rotation": self.rotations.get(self.current_path),
                 "favourite": self.favourites.contains(self.current_path),
                 "display_mode": self.display_mode,
                 "delete_pending": pending,
@@ -87,9 +127,16 @@ class RuntimeState:
         with self.lock:
             self.paused = paused
 
-    def next(self) -> None:
+    def navigate(self, direction: str) -> None:
         with self.lock:
+            self.navigation = direction
             self.command_sequence += 1
+
+    def next(self) -> None:
+        self.navigate("next")
+
+    def previous(self) -> None:
+        self.navigate("previous")
 
     def set_display_mode(self, mode: str) -> None:
         with self.lock:
@@ -99,6 +146,14 @@ class RuntimeState:
         with self.lock:
             path = self.current_path
         return self.favourites.add(path)
+
+    def rotate_current(self) -> int:
+        with self.lock:
+            path = self.current_path
+            kind = self.current_kind
+        if kind != "image" or not path:
+            raise ValueError("The current item is not a photo")
+        return self.rotations.rotate_clockwise(path)
 
     def request_delete_current(self, seconds: int = 30) -> bool:
         with self.lock:

@@ -15,6 +15,22 @@ from .config import ConfigStore, validate
 from .display import DisplayController
 from .runtime import RuntimeState
 
+MONTHS = [
+    "All months",
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+]
+
 
 def _hardware_suffix() -> str:
     for path in (Path("/proc/device-tree/serial-number"), Path("/etc/machine-id")):
@@ -41,7 +57,7 @@ class MqttBridge:
         self,
         store: ConfigStore,
         runtime: RuntimeState,
-        refresh: Callable[[], tuple[int, str, list[str]]],
+        refresh: Callable[[], tuple[int, str, list[str], list[str]]],
         quarantine: Callable[[str], tuple[str, int]],
         display: DisplayController,
         source_changed: Callable[[], None],
@@ -64,6 +80,7 @@ class MqttBridge:
         self.count = 0
         self.error = ""
         self.folder_options = [""]
+        self.year_options: list[str] = []
         self.refresh_guard = threading.Lock()
         self.refresh_running = False
         self.refresh_pending = False
@@ -102,7 +119,12 @@ class MqttBridge:
 
         def worker() -> None:
             while True:
-                self.count, self.error, self.folder_options = (
+                (
+                    self.count,
+                    self.error,
+                    self.folder_options,
+                    self.year_options,
+                ) = (
                     self.refresh_catalogue()
                 )
                 self.publish_discovery()
@@ -124,8 +146,12 @@ class MqttBridge:
                 self.runtime.set_paused(value.upper() in {"ON", "PAUSE", "TRUE", "1"})
             elif command == "next":
                 self.runtime.next()
+            elif command == "previous":
+                self.runtime.previous()
             elif command == "favourite":
                 self.runtime.favourite_current()
+            elif command == "rotate":
+                self.runtime.rotate_current()
             elif command == "request_delete":
                 if not self.runtime.request_delete_current():
                     raise RuntimeError("There is no current item to delete")
@@ -147,13 +173,19 @@ class MqttBridge:
                 "fit",
                 "dashboard_url",
                 "dashboard_return",
+                "date_year",
+                "date_month",
+                "sleep_minutes",
             }:
                 self._update_config(command, value)
                 self.runtime.next()
             elif command == "mode":
                 config = self.store.load()
                 self.display.show(
-                    value, config.dashboard_url, config.dashboard_return_minutes
+                    value,
+                    config.dashboard_url,
+                    config.dashboard_return_minutes,
+                    config.sleep_minutes,
                 )
                 self.runtime.set_display_mode(self.display.mode)
         except Exception as exc:
@@ -169,11 +201,25 @@ class MqttBridge:
             "fit": "fit_mode",
             "dashboard_url": "dashboard_url",
             "dashboard_return": "dashboard_return_minutes",
+            "date_year": "date_year",
+            "date_month": "date_month",
+            "sleep_minutes": "sleep_minutes",
         }[command]
-        raw[key] = "" if command == "folder" and value == "/" else value
-        self.store.save(validate(raw, current))
-        if command == "folder":
-            self.source_changed()
+        if command == "folder" and value == "/":
+            raw[key] = ""
+        elif command == "date_year":
+            raw[key] = 0 if value == "All years" else value
+        elif command == "date_month":
+            raw[key] = MONTHS.index(value) if value in MONTHS else value
+        else:
+            raw[key] = value
+        saved = validate(raw, current)
+        self.store.save(saved)
+        if command == "sleep_minutes":
+            self.display.reschedule_sleep(saved.sleep_minutes)
+        if command in {"folder", "date_year", "date_month"}:
+            if command == "folder":
+                self.source_changed()
             self._refresh_async()
 
     def publish_discovery(self) -> None:
@@ -185,7 +231,7 @@ class MqttBridge:
             "name": self.device_name,
             "manufacturer": "Managed Pi",
             "model": "NAS Photo Viewer",
-            "sw_version": "0.6.4",
+            "sw_version": "0.7.0",
         }
         state = f"{self.base}/state"
         definitions = {
@@ -199,16 +245,28 @@ class MqttBridge:
                 "icon": "mdi:pause-circle",
             },
             ("button", "next_item"): {
-                "name": "Next item",
+                "name": "Skip forward",
                 "command_topic": f"{self.base}/command/next",
                 "payload_press": "PRESS",
                 "icon": "mdi:skip-next",
+            },
+            ("button", "previous_item"): {
+                "name": "Skip back",
+                "command_topic": f"{self.base}/command/previous",
+                "payload_press": "PRESS",
+                "icon": "mdi:skip-previous",
             },
             ("button", "favourite_item"): {
                 "name": "Favourite item",
                 "command_topic": f"{self.base}/command/favourite",
                 "payload_press": "PRESS",
                 "icon": "mdi:heart",
+            },
+            ("button", "rotate_clockwise"): {
+                "name": "Rotate clockwise",
+                "command_topic": f"{self.base}/command/rotate",
+                "payload_press": "PRESS",
+                "icon": "mdi:rotate-right",
             },
             ("button", "request_delete_item"): {
                 "name": "Delete item",
@@ -253,6 +311,22 @@ class MqttBridge:
                 "options": [folder or "/" for folder in self.folder_options] or ["/"],
                 "icon": "mdi:folder-multiple-image",
             },
+            ("select", "photo_year"): {
+                "name": "Photo year",
+                "command_topic": f"{self.base}/command/date_year",
+                "state_topic": state,
+                "value_template": "{{ value_json.date_year_label }}",
+                "options": ["All years", *self.year_options],
+                "icon": "mdi:calendar-range",
+            },
+            ("select", "photo_month"): {
+                "name": "Photo month",
+                "command_topic": f"{self.base}/command/date_month",
+                "state_topic": state,
+                "value_template": "{{ value_json.date_month_label }}",
+                "options": MONTHS,
+                "icon": "mdi:calendar-month",
+            },
             ("select", "image_fit"): {
                 "name": "Image fit",
                 "command_topic": f"{self.base}/command/fit",
@@ -266,7 +340,7 @@ class MqttBridge:
                 "command_topic": f"{self.base}/command/mode",
                 "state_topic": state,
                 "value_template": "{{ value_json.display_mode }}",
-                "options": ["photos", "collage", "dashboard"],
+                "options": ["photos", "collage", "dashboard", "sleep"],
                 "icon": "mdi:monitor-dashboard",
             },
             ("text", "dashboard_url"): {
@@ -289,6 +363,18 @@ class MqttBridge:
                 "unit_of_measurement": "min",
                 "icon": "mdi:timer-outline",
             },
+            ("number", "sleep_after_minutes"): {
+                "name": "Sleep after",
+                "command_topic": f"{self.base}/command/sleep_minutes",
+                "state_topic": state,
+                "value_template": "{{ value_json.sleep_minutes }}",
+                "min": 0,
+                "max": 1440,
+                "step": 5,
+                "mode": "box",
+                "unit_of_measurement": "min",
+                "icon": "mdi:sleep",
+            },
             ("button", "show_photos"): {
                 "name": "Show photos",
                 "command_topic": f"{self.base}/command/mode",
@@ -306,6 +392,18 @@ class MqttBridge:
                 "command_topic": f"{self.base}/command/mode",
                 "payload_press": "collage",
                 "icon": "mdi:view-grid-plus",
+            },
+            ("button", "sleep_display"): {
+                "name": "Sleep display",
+                "command_topic": f"{self.base}/command/mode",
+                "payload_press": "sleep",
+                "icon": "mdi:power-sleep",
+            },
+            ("button", "wake_display"): {
+                "name": "Wake display",
+                "command_topic": f"{self.base}/command/mode",
+                "payload_press": "photos",
+                "icon": "mdi:power",
             },
             ("sensor", "current_item"): {
                 "name": "Current item",
@@ -373,6 +471,14 @@ class MqttBridge:
                 "display_mode": self.display.mode,
                 "dashboard_url": config.dashboard_url,
                 "dashboard_return_minutes": config.dashboard_return_minutes,
+                "sleep_minutes": config.sleep_minutes,
+                "date_year": config.date_year,
+                "date_year_label": str(config.date_year)
+                if config.date_year
+                else "All years",
+                "date_month": config.date_month,
+                "date_month_label": MONTHS[config.date_month],
+                "rotation": snapshot["rotation"],
             }
         )
         self.client.publish(
