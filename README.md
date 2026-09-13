@@ -12,6 +12,7 @@ from a local directory or an SMB share on a NAS.
   MOV, WebM and Ogg videos.
 - Random playback without immediate repeats.
 - Filter dated folders by year, month, or a month within a selected year.
+- Show a discreet capture date and GPS location caption when metadata is available.
 - Navigate backward and forward through the random playback history.
 - Remember per-photo clockwise rotation corrections across restarts.
 - Collage mode shows five or six gently rotated photos and replaces one at a
