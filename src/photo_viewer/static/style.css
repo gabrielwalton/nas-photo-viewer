@@ -19,8 +19,10 @@ button { border: 0; border-radius: 12px; padding: .8rem 1.1rem; cursor: pointer;
 button.secondary { background: #303847; }
 .round-button { position: absolute; top: 18px; right: 18px; width: 48px; height: 48px; padding: 0; border-radius: 50%; background: rgba(18, 22, 29, .72); opacity: .25; transition: opacity .2s; }
 .round-button:hover, .round-button:focus { opacity: 1; }
-#caption { position: absolute; left: 20px; bottom: 16px; padding: .45rem .7rem; border-radius: 8px; background: rgba(0,0,0,.45); opacity: 0; transition: opacity .2s; }
-#viewer:hover #caption { opacity: 1; }
+#caption { position: absolute; right: clamp(16px, 2vw, 40px); bottom: clamp(14px, 2vh, 32px); max-width: 42vw; padding: .45rem .7rem; border-radius: 8px; text-align: right; color: rgba(255,255,255,.9); background: rgba(0,0,0,.38); text-shadow: 0 1px 4px #000; opacity: 0; transition: opacity .35s; pointer-events: none; }
+#caption.visible { opacity: 1; }
+#capture-date { font-size: clamp(13px, 1vw, 19px); font-weight: 550; letter-spacing: .015em; }
+#capture-location { margin-top: .12rem; font-size: clamp(10px, .72vw, 14px); color: rgba(255,255,255,.72); }
 dialog { width: min(92vw, 620px); border: 1px solid #394150; border-radius: 20px; padding: 0; color: #f4f6fb; background: #151922; box-shadow: 0 30px 100px #000; cursor: auto; }
 dialog::backdrop { background: rgba(0,0,0,.75); }
 form { padding: 1.4rem; }

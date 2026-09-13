@@ -4,6 +4,8 @@ const statusText = document.querySelector('#form-status');
 const message = document.querySelector('#message');
 const messageText = document.querySelector('#message-text');
 const caption = document.querySelector('#caption');
+const captureDate = document.querySelector('#capture-date');
+const captureLocation = document.querySelector('#capture-location');
 const photos = [document.querySelector('#photo-a'), document.querySelector('#photo-b')];
 const video = document.querySelector('#video');
 const collage = document.querySelector('#collage');
@@ -74,7 +76,9 @@ function hideCollage() {
 
 async function reportCurrent(item) {
   currentPath = item.path;
-  caption.textContent = item.name;
+  captureDate.textContent = item.display_date || '';
+  captureLocation.textContent = item.display_location || '';
+  caption.classList.toggle('visible', displayMode === 'photos' && Boolean(item.display_date || item.display_location));
   await json('/api/current', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({path: item.path, name: item.name, kind: item.kind}),

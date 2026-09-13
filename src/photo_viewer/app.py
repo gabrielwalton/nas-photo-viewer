@@ -12,6 +12,7 @@ import subprocess
 import threading
 import time
 import wave
+from datetime import datetime
 from pathlib import Path
 
 from flask import (
@@ -153,6 +154,76 @@ def media_folder_date(path: str) -> tuple[int, int] | None:
     return None
 
 
+def friendly_folder_date(path: str) -> str:
+    for part in Path(path.replace("\\", "/")).parts[:-1]:
+        for pattern in DATE_PATTERNS:
+            match = pattern.fullmatch(part)
+            if not match:
+                continue
+            try:
+                value = datetime(
+                    int(match.group("year")),
+                    int(match.group("month")),
+                    int(match.group("day")),
+                )
+            except ValueError:
+                continue
+            return f"{value.day} {value.strftime('%B %Y')}"
+    return ""
+
+
+def _gps_coordinate(values, reference) -> float | None:
+    try:
+        if isinstance(reference, bytes):
+            reference = reference.decode(errors="ignore")
+        degrees, minutes, seconds = (float(value) for value in values)
+        result = degrees + minutes / 60 + seconds / 3600
+        return -result if str(reference).strip().upper() in {"S", "W"} else result
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
+def media_metadata(item: MediaItem, config) -> dict[str, str]:
+    """Read lightweight EXIF data, falling back to a dated folder name."""
+    result = {"display_date": friendly_folder_date(item.path), "display_location": ""}
+    if item.kind != "image":
+        return result
+    try:
+        from PIL import Image
+
+        stream, _mime, _size = make_source(config).open(item.path)
+        with stream, Image.open(stream) as image:
+            exif = image.getexif()
+            captured = exif.get(36867) or exif.get(36868) or exif.get(306)
+            if isinstance(captured, bytes):
+                captured = captured.decode(errors="ignore")
+            if captured:
+                try:
+                    parsed = datetime.strptime(
+                        str(captured)[:19], "%Y:%m:%d %H:%M:%S"
+                    )
+                    result["display_date"] = (
+                        f"{parsed.day} {parsed.strftime('%B %Y')}"
+                    )
+                except ValueError:
+                    pass
+
+            gps = exif.get_ifd(34853)
+            latitude = _gps_coordinate(gps.get(2), gps.get(1, "N"))
+            longitude = _gps_coordinate(gps.get(4), gps.get(3, "E"))
+            if latitude is not None and longitude is not None:
+                lat_ref = "N" if latitude >= 0 else "S"
+                lon_ref = "E" if longitude >= 0 else "W"
+                result["display_location"] = (
+                    f"{abs(latitude):.4f}° {lat_ref} · "
+                    f"{abs(longitude):.4f}° {lon_ref}"
+                )
+    except Exception:
+        # Metadata is optional. A malformed or unsupported image must still display.
+        pass
+    return result
+
+
 def filter_media(items: list[MediaItem], config) -> list[MediaItem]:
     if not config.date_year and not config.date_month:
         return items
@@ -214,6 +285,8 @@ def create_app(test_config: dict | None = None) -> Flask:
     rotations = Rotations(store.data_dir)
     runtime = RuntimeState(favourites, rotations)
     history = PlaybackHistory()
+    metadata_cache: dict[str, dict[str, str]] = {}
+    metadata_lock = threading.Lock()
     kiosk_url_file = Path(
         app.config.get(
             "PHOTO_VIEWER_KIOSK_URL_FILE",
@@ -260,6 +333,20 @@ def create_app(test_config: dict | None = None) -> Flask:
     def source_changed() -> None:
         catalogue.invalidate(clear=True)
         history.clear()
+        with metadata_lock:
+            metadata_cache.clear()
+
+    def metadata(item: MediaItem, config) -> dict[str, str]:
+        with metadata_lock:
+            cached = metadata_cache.get(item.path)
+        if cached is not None:
+            return cached
+        value = media_metadata(item, config)
+        with metadata_lock:
+            if len(metadata_cache) >= 2048:
+                metadata_cache.pop(next(iter(metadata_cache)))
+            metadata_cache[item.path] = value
+        return value
 
     bridge = MqttBridge(
         store,
@@ -479,6 +566,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                 "transition_seconds": config.transition_seconds,
                 "fit_mode": config.fit_mode,
                 "rotation": rotations.get(item.path),
+                **metadata(item, config),
             }
         )
 

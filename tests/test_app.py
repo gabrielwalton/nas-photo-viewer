@@ -1,4 +1,39 @@
+from types import SimpleNamespace
+
+from PIL import Image
+
 from photo_viewer import create_app
+from photo_viewer.app import _gps_coordinate, friendly_folder_date, media_metadata
+from photo_viewer.sources import MediaItem
+
+
+def test_friendly_date_uses_dated_folder():
+    assert (
+        friendly_folder_date("Gabe/Photos/Archive/24-06-2018/photo.jpg")
+        == "24 June 2018"
+    )
+    assert friendly_folder_date("Gabe/Photos/phone/photo.jpg") == ""
+
+
+def test_gps_coordinate_formats_hemisphere():
+    assert _gps_coordinate((51, 30, 0), "N") == 51.5
+    assert _gps_coordinate((0, 7, 40.08), b"W") == -0.1278
+
+
+def test_embedded_photo_date_overrides_folder_date(tmp_path):
+    photo = tmp_path / "photo.jpg"
+    exif = Image.Exif()
+    exif[36867] = "2019:07:05 12:30:00"
+    Image.new("RGB", (2, 2)).save(photo, exif=exif)
+    config = SimpleNamespace(
+        source_type="local",
+        local_path=str(tmp_path),
+        base_folder="",
+    )
+
+    result = media_metadata(MediaItem("photo.jpg", "photo.jpg", "image"), config)
+
+    assert result["display_date"] == "5 July 2019"
 
 
 def test_health_succeeds_before_configuration(tmp_path):
