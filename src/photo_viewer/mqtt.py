@@ -153,7 +153,7 @@ class MqttBridge:
             "name": self.device_name,
             "manufacturer": "Managed Pi",
             "model": "NAS Photo Viewer",
-            "sw_version": "0.5.0",
+            "sw_version": "0.5.1",
         }
         state = f"{self.base}/state"
         definitions = {

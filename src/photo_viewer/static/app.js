@@ -83,6 +83,7 @@ async function reportCurrent(item) {
 async function showNext() {
   if (loading || displayMode !== 'photos') return;
   loading = true;
+  let nextDelay = 0;
   clearTimeout(timer);
   try {
     const item = await json(`/api/next?after=${encodeURIComponent(currentPath)}`);
@@ -111,16 +112,17 @@ async function showNext() {
       photos[active].classList.remove('active');
       incoming.classList.add('active');
       active = 1 - active;
-      if (!paused) timer = setTimeout(showNext, item.interval_seconds * 1000);
+      nextDelay = item.interval_seconds * 1000;
     }
     await reportCurrent(item);
     message.classList.add('hidden');
   } catch (error) {
     messageText.textContent = error.message;
     message.classList.remove('hidden');
-    timer = setTimeout(showNext, 15000);
+    nextDelay = 15000;
   } finally {
     loading = false;
+    if (nextDelay && !paused && displayMode === 'photos') timer = setTimeout(showNext, nextDelay);
   }
 }
 
@@ -146,6 +148,7 @@ async function setCollageTile(tile, item, transitionSeconds) {
 async function showCollage() {
   if (loading || displayMode !== 'collage') return;
   loading = true;
+  let nextDelay = 0;
   clearTimeout(timer);
   try {
     const result = await json('/api/collage');
@@ -163,19 +166,23 @@ async function showCollage() {
     await Promise.all(tiles.map((tile, index) => setCollageTile(tile, result.items[index], result.transition_seconds)));
     await reportCurrent(result.items[0]);
     message.classList.add('hidden');
-    if (!paused) timer = setTimeout(rotateCollageItem, result.interval_seconds * 1000);
+    nextDelay = result.interval_seconds * 1000;
   } catch (error) {
     messageText.textContent = error.message;
     message.classList.remove('hidden');
-    timer = setTimeout(showCollage, 15000);
+    nextDelay = 15000;
   } finally {
     loading = false;
+    if (nextDelay && !paused && displayMode === 'collage') {
+      timer = setTimeout(collageItems.length ? rotateCollageItem : showCollage, nextDelay);
+    }
   }
 }
 
 async function rotateCollageItem() {
   if (loading || paused || displayMode !== 'collage' || !collageItems.length) return;
   loading = true;
+  let nextDelay = 0;
   clearTimeout(timer);
   try {
     const index = Math.floor(Math.random() * collageItems.length);
@@ -185,11 +192,14 @@ async function rotateCollageItem() {
     await setCollageTile(tile, item, item.transition_seconds);
     collageItems[index] = item;
     await reportCurrent(item);
-    timer = setTimeout(rotateCollageItem, item.interval_seconds * 1000);
+    nextDelay = item.interval_seconds * 1000;
   } catch (_error) {
-    timer = setTimeout(rotateCollageItem, 15000);
+    nextDelay = 15000;
   } finally {
     loading = false;
+    if (nextDelay && !paused && displayMode === 'collage') {
+      timer = setTimeout(rotateCollageItem, nextDelay);
+    }
   }
 }
 
