@@ -37,6 +37,7 @@ class Catalogue:
         self.loaded_at = 0.0
         self.error = ""
         self.lock = threading.Lock()
+        self.scan_lock = threading.Lock()
         self._load_cache(initial_config)
 
     @staticmethod
@@ -78,6 +79,11 @@ class Catalogue:
         with self.lock:
             if self.loaded_at and not force and time.monotonic() - self.loaded_at < 60:
                 return self.items
+        # A large NAS can take minutes to enumerate. Only one worker should do that
+        # work; web requests arriving meanwhile get the last complete catalogue.
+        if not self.scan_lock.acquire(blocking=False):
+            with self.lock:
+                return list(self.items)
         try:
             config = store.load()
             items = make_source(config).media()
@@ -96,6 +102,8 @@ class Catalogue:
                 self.error = str(exc)
                 self.loaded_at = time.monotonic()
                 return self.items
+        finally:
+            self.scan_lock.release()
 
     def invalidate(self, clear: bool = False) -> None:
         with self.lock:
