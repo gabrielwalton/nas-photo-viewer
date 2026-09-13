@@ -8,6 +8,27 @@ def test_health_succeeds_before_configuration(tmp_path):
     assert response.json == {"ok": True}
 
 
+def test_hdmi_audio_tone_uses_first_hdmi_output(tmp_path, monkeypatch):
+    calls = []
+
+    class Result:
+        returncode = 0
+        stderr = ""
+
+    monkeypatch.setattr("photo_viewer.app.shutil.which", lambda command: command)
+    monkeypatch.setattr(
+        "photo_viewer.app.subprocess.run",
+        lambda command, **kwargs: calls.append(command) or Result(),
+    )
+    app = create_app({"TESTING": True, "PHOTO_VIEWER_DATA_DIR": str(tmp_path)})
+    response = app.test_client().post("/api/diagnostics/audio/test")
+
+    assert response.status_code == 200
+    assert response.json["ok"] is True
+    assert calls[0][0:4] == ["aplay", "-q", "-D", "plughw:CARD=vc4hdmi0,DEV=0"]
+    assert (tmp_path / "hdmi-audio-test.wav").exists()
+
+
 def test_local_slideshow(tmp_path):
     photos = tmp_path / "photos"
     photos.mkdir()

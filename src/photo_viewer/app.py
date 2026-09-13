@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import os
 import random
 import shutil
+import struct
+import subprocess
 import threading
 import time
+import wave
 from pathlib import Path
 
 from flask import (
@@ -235,6 +239,47 @@ def create_app(test_config: dict | None = None) -> Flask:
                 },
             }
         )
+
+    @app.post("/api/diagnostics/audio/test")
+    def audio_test():
+        if not shutil.which("aplay"):
+            return jsonify({"ok": False, "error": "aplay is not installed"}), 503
+
+        tone_path = store.data_dir / "hdmi-audio-test.wav"
+        sample_rate = 48_000
+        duration_seconds = 2
+        amplitude = 8_000
+        store.data_dir.mkdir(parents=True, exist_ok=True)
+        with wave.open(str(tone_path), "wb") as output:
+            output.setnchannels(2)
+            output.setsampwidth(2)
+            output.setframerate(sample_rate)
+            for sample in range(sample_rate * duration_seconds):
+                value = int(
+                    amplitude * math.sin(2 * math.pi * 660 * sample / sample_rate)
+                )
+                output.writeframesraw(struct.pack("<hh", value, value))
+
+        result = subprocess.run(
+            [
+                "aplay",
+                "-q",
+                "-D",
+                "plughw:CARD=vc4hdmi0,DEV=0",
+                str(tone_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        return jsonify(
+            {
+                "ok": result.returncode == 0,
+                "returncode": result.returncode,
+                "error": result.stderr.strip()[-500:],
+            }
+        ), (200 if result.returncode == 0 else 502)
 
     @app.get("/api/config")
     def get_config():
