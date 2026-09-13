@@ -192,7 +192,12 @@ def create_app(test_config: dict | None = None) -> Flask:
                 {"ok": False, "error": "No supported photos or videos found"}
             ), 404
         after = request.args.get("after", "")
-        choices = [item for item in items if item.path != after] or items
+        kind = request.args.get("kind", "")
+        eligible = [item for item in items if not kind or item.kind == kind]
+        if not eligible:
+            message = f"No {kind or 'supported'} media found"
+            return jsonify({"ok": False, "error": message}), 404
+        choices = [item for item in eligible if item.path != after] or eligible
         item = random.SystemRandom().choice(choices)
         bridge.publish_state()
         return jsonify(
@@ -202,6 +207,38 @@ def create_app(test_config: dict | None = None) -> Flask:
                 "name": item.name,
                 "kind": item.kind,
                 "url": f"/media/{encode_path(item.path)}",
+                "interval_seconds": config.interval_seconds,
+                "transition_seconds": config.transition_seconds,
+                "fit_mode": config.fit_mode,
+            }
+        )
+
+    @app.get("/api/collage")
+    def collage_media():
+        config = store.load()
+        items = catalogue.refresh(store)
+        if catalogue.error:
+            return jsonify({"ok": False, "error": catalogue.error}), 503
+        images = [item for item in items if item.kind == "image"]
+        if not images:
+            error = {"ok": False, "error": "No photos found for collage mode"}
+            return jsonify(error), 404
+        requested = request.args.get("count", type=int)
+        requested = requested or random.SystemRandom().choice((5, 6))
+        count = min(max(requested, 1), 6, len(images))
+        selected = random.SystemRandom().sample(images, count)
+        return jsonify(
+            {
+                "ok": True,
+                "items": [
+                    {
+                        "path": item.path,
+                        "name": item.name,
+                        "kind": item.kind,
+                        "url": f"/media/{encode_path(item.path)}",
+                    }
+                    for item in selected
+                ],
                 "interval_seconds": config.interval_seconds,
                 "transition_seconds": config.transition_seconds,
                 "fit_mode": config.fit_mode,

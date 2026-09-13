@@ -52,8 +52,8 @@ class DisplayController:
 
     def show(self, mode: str, dashboard_url: str, return_minutes: int = 0) -> None:
         mode = mode.strip().lower()
-        if mode not in {"photos", "dashboard"}:
-            raise ValueError("Display mode must be photos or dashboard")
+        if mode not in {"photos", "collage", "dashboard"}:
+            raise ValueError("Display mode must be photos, collage or dashboard")
         if mode == "dashboard":
             if not self.supported:
                 raise RuntimeError(

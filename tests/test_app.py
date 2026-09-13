@@ -41,6 +41,23 @@ def test_video_is_catalogued_and_supports_byte_ranges(tmp_path, monkeypatch):
     assert response.headers["Content-Range"] == "bytes 2-5/10"
 
 
+def test_collage_returns_unique_images_and_excludes_videos(tmp_path):
+    photos = tmp_path / "photos"
+    photos.mkdir()
+    for index in range(7):
+        (photos / f"photo-{index}.jpg").write_bytes(b"photo")
+    (photos / "clip.mp4").write_bytes(b"video")
+    app = create_app({"TESTING": True, "PHOTO_VIEWER_DATA_DIR": str(tmp_path / "data")})
+    client = app.test_client()
+    client.put("/api/config", json={"source_type": "local", "local_path": str(photos)})
+    response = client.get("/api/collage?count=6")
+    assert response.status_code == 200
+    items = response.json["items"]
+    assert len(items) == 6
+    assert len({item["path"] for item in items}) == 6
+    assert {item["kind"] for item in items} == {"image"}
+
+
 def test_local_catalogue_obeys_media_limit(tmp_path, monkeypatch):
     monkeypatch.setattr("photo_viewer.sources.MAX_ITEMS", 2)
     photos = tmp_path / "photos"
@@ -103,3 +120,7 @@ def test_display_mode_writes_url_and_returns_to_photos(tmp_path):
         "http://127.0.0.1:8080"
     )
     assert restarts == [True, True]
+    response = client.post("/api/display", json={"mode": "collage"})
+    assert response.json["display_mode"] == "collage"
+    assert (tmp_path / "kiosk-url").read_text().strip() == "http://127.0.0.1:8080"
+    assert restarts == [True, True, True]

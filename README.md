@@ -11,6 +11,8 @@ from a local directory or an SMB share on a NAS.
 - Recursively find JPEG, PNG, GIF, WebP, BMP and AVIF images plus MP4, M4V,
   MOV, WebM and Ogg videos.
 - Random playback without immediate repeats.
+- Collage mode shows five or six gently rotated photos and replaces one at a
+  time, without mixing videos into the collage.
 - Play videos to the end and use the configured timer for still images.
 - Configurable display duration, contain/cover fit and fade transition.
 - Publish pause, next, favourite, refresh, timer, folder, fit, display mode and

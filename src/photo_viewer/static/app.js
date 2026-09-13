@@ -6,12 +6,15 @@ const messageText = document.querySelector('#message-text');
 const caption = document.querySelector('#caption');
 const photos = [document.querySelector('#photo-a'), document.querySelector('#photo-b')];
 const video = document.querySelector('#video');
+const collage = document.querySelector('#collage');
 let active = 0;
 let currentPath = '';
 let timer;
 let paused = false;
 let commandSequence = null;
 let loading = false;
+let displayMode = '';
+let collageItems = [];
 
 async function json(url, options) {
   const response = await fetch(url, options);
@@ -49,15 +52,36 @@ async function saveSettings(test) {
     }
     statusText.className = 'success';
     field('smb_password').value = '';
-    start();
+    await activateMode(displayMode || 'photos', true);
   } catch (error) {
     statusText.textContent = error.message;
     statusText.className = 'error';
   }
 }
 
+function hideSlideshow() {
+  photos.forEach(photo => photo.classList.remove('active'));
+  video.pause();
+  video.classList.remove('active');
+}
+
+function hideCollage() {
+  collage.classList.remove('active');
+  collage.replaceChildren();
+  collageItems = [];
+}
+
+async function reportCurrent(item) {
+  currentPath = item.path;
+  caption.textContent = item.name;
+  await json('/api/current', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({path: item.path, name: item.name, kind: item.kind}),
+  });
+}
+
 async function showNext() {
-  if (loading) return;
+  if (loading || displayMode !== 'photos') return;
   loading = true;
   clearTimeout(timer);
   try {
@@ -89,13 +113,8 @@ async function showNext() {
       active = 1 - active;
       if (!paused) timer = setTimeout(showNext, item.interval_seconds * 1000);
     }
-    currentPath = item.path;
-    caption.textContent = item.name;
+    await reportCurrent(item);
     message.classList.add('hidden');
-    await json('/api/current', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({path: item.path, name: item.name, kind: item.kind}),
-    });
   } catch (error) {
     messageText.textContent = error.message;
     message.classList.remove('hidden');
@@ -105,18 +124,105 @@ async function showNext() {
   }
 }
 
-async function start() { currentPath = ''; await showNext(); }
+function randomTransform() {
+  const angle = (Math.random() * 8 - 4).toFixed(2);
+  const x = (Math.random() * 1.4 - .7).toFixed(2);
+  const y = (Math.random() * 1.4 - .7).toFixed(2);
+  return `translate(${x}vw, ${y}vh) rotate(${angle}deg) scale(.96)`;
+}
+
+async function setCollageTile(tile, item, transitionSeconds) {
+  tile.classList.remove('loaded');
+  tile.style.transitionDuration = `${transitionSeconds}s`;
+  tile.style.transform = randomTransform();
+  await new Promise((resolve, reject) => {
+    tile.onload = resolve;
+    tile.onerror = () => reject(new Error('A collage photo could not be displayed'));
+    tile.src = item.url;
+  });
+  tile.classList.add('loaded');
+}
+
+async function showCollage() {
+  if (loading || displayMode !== 'collage') return;
+  loading = true;
+  clearTimeout(timer);
+  try {
+    const result = await json('/api/collage');
+    hideSlideshow();
+    collage.replaceChildren();
+    collage.classList.add('active');
+    collageItems = result.items;
+    const tiles = result.items.map(() => {
+      const tile = document.createElement('img');
+      tile.className = 'collage-photo';
+      tile.alt = '';
+      collage.appendChild(tile);
+      return tile;
+    });
+    await Promise.all(tiles.map((tile, index) => setCollageTile(tile, result.items[index], result.transition_seconds)));
+    await reportCurrent(result.items[0]);
+    message.classList.add('hidden');
+    if (!paused) timer = setTimeout(rotateCollageItem, result.interval_seconds * 1000);
+  } catch (error) {
+    messageText.textContent = error.message;
+    message.classList.remove('hidden');
+    timer = setTimeout(showCollage, 15000);
+  } finally {
+    loading = false;
+  }
+}
+
+async function rotateCollageItem() {
+  if (loading || paused || displayMode !== 'collage' || !collageItems.length) return;
+  loading = true;
+  clearTimeout(timer);
+  try {
+    const index = Math.floor(Math.random() * collageItems.length);
+    const previous = collageItems[index];
+    const item = await json(`/api/next?kind=image&after=${encodeURIComponent(previous.path)}`);
+    const tile = collage.children[index];
+    await setCollageTile(tile, item, item.transition_seconds);
+    collageItems[index] = item;
+    await reportCurrent(item);
+    timer = setTimeout(rotateCollageItem, item.interval_seconds * 1000);
+  } catch (_error) {
+    timer = setTimeout(rotateCollageItem, 15000);
+  } finally {
+    loading = false;
+  }
+}
+
+async function activateMode(mode, force = false) {
+  if (!force && displayMode === mode) return;
+  clearTimeout(timer);
+  displayMode = mode;
+  if (mode === 'collage') {
+    hideCollage();
+    await showCollage();
+  } else if (mode === 'photos') {
+    hideCollage();
+    currentPath = '';
+    await showNext();
+  }
+}
 
 async function syncRuntime() {
   try {
     const state = await json('/api/runtime');
-    if (commandSequence !== null && state.command_sequence !== commandSequence) showNext();
+    if (state.display_mode !== displayMode) await activateMode(state.display_mode);
+    if (commandSequence !== null && state.command_sequence !== commandSequence) {
+      if (displayMode === 'collage') await rotateCollageItem();
+      else await showNext();
+    }
     commandSequence = state.command_sequence;
     if (state.paused !== paused) {
       paused = state.paused;
       if (paused) {
         clearTimeout(timer);
         video.pause();
+      } else if (displayMode === 'collage') {
+        rotateCollageItem();
       } else if (video.classList.contains('active')) {
         video.play();
       } else {
@@ -127,6 +233,18 @@ async function syncRuntime() {
     // A temporary network interruption should not replace the current picture.
   }
 }
+
+async function start() {
+  try {
+    const state = await json('/api/runtime');
+    paused = state.paused;
+    commandSequence = state.command_sequence;
+    await activateMode(state.display_mode || 'photos');
+  } catch (_error) {
+    await activateMode('photos');
+  }
+}
+
 document.querySelector('#settings-button').addEventListener('click', async () => { await loadSettings(); dialog.showModal(); });
 document.querySelector('#open-settings-primary').addEventListener('click', async () => { await loadSettings(); dialog.showModal(); });
 document.querySelector('#close-settings').addEventListener('click', () => dialog.close());

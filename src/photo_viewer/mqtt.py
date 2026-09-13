@@ -139,7 +139,7 @@ class MqttBridge:
             "name": self.device_name,
             "manufacturer": "Managed Pi",
             "model": "NAS Photo Viewer",
-            "sw_version": "0.3.0",
+            "sw_version": "0.4.0",
         }
         state = f"{self.base}/state"
         definitions = {
@@ -202,7 +202,7 @@ class MqttBridge:
                 "command_topic": f"{self.base}/command/mode",
                 "state_topic": state,
                 "value_template": "{{ value_json.display_mode }}",
-                "options": ["photos", "dashboard"],
+                "options": ["photos", "collage", "dashboard"],
                 "icon": "mdi:monitor-dashboard",
             },
             ("text", "dashboard_url"): {
@@ -236,6 +236,12 @@ class MqttBridge:
                 "command_topic": f"{self.base}/command/mode",
                 "payload_press": "dashboard",
                 "icon": "mdi:view-dashboard",
+            },
+            ("button", "show_collage"): {
+                "name": "Show collage",
+                "command_topic": f"{self.base}/command/mode",
+                "payload_press": "collage",
+                "icon": "mdi:view-grid-plus",
             },
             ("sensor", "current_item"): {
                 "name": "Current item",
