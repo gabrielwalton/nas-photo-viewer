@@ -27,6 +27,8 @@ class ViewerConfig:
     dashboard_url: str = ""
     dashboard_return_minutes: int = 0
     sleep_minutes: int = 120
+    visualizer_style: str = "kaleidoscope"
+    visualizer_sensitivity: int = 100
 
     @property
     def configured(self) -> bool:
@@ -54,6 +56,7 @@ def validate(raw: dict, previous: ViewerConfig | None = None) -> ViewerConfig:
         date_month = int(raw.get("date_month", 0))
         dashboard_return = int(raw.get("dashboard_return_minutes", 0))
         sleep_minutes = int(raw.get("sleep_minutes", 120))
+        visualizer_sensitivity = int(raw.get("visualizer_sensitivity", 100))
     except (TypeError, ValueError) as exc:
         raise ConfigError("Timing values must be numbers") from exc
     if not 3 <= interval <= 3600:
@@ -68,6 +71,8 @@ def validate(raw: dict, previous: ViewerConfig | None = None) -> ViewerConfig:
         raise ConfigError("Dashboard return time must be between 0 and 1440 minutes")
     if not 0 <= sleep_minutes <= 1440:
         raise ConfigError("Sleep time must be between 0 and 1440 minutes")
+    if not 25 <= visualizer_sensitivity <= 300:
+        raise ConfigError("Visualiser sensitivity must be between 25 and 300 percent")
 
     dashboard_url = str(raw.get("dashboard_url", "")).strip()
     if dashboard_url and not dashboard_url.startswith(("http://", "https://")):
@@ -76,6 +81,12 @@ def validate(raw: dict, previous: ViewerConfig | None = None) -> ViewerConfig:
     fit_mode = str(raw.get("fit_mode", "contain")).strip().lower()
     if fit_mode not in {"contain", "cover"}:
         raise ConfigError("Fit mode must be contain or cover")
+
+    visualizer_style = str(
+        raw.get("visualizer_style", "kaleidoscope")
+    ).strip().lower()
+    if visualizer_style not in {"kaleidoscope", "plasma", "tunnel", "starfield"}:
+        raise ConfigError("Unknown visualiser style")
 
     server = str(raw.get("smb_server", "")).strip().strip("\\/")
     share = str(raw.get("smb_share", "")).strip().strip("\\/")
@@ -102,6 +113,8 @@ def validate(raw: dict, previous: ViewerConfig | None = None) -> ViewerConfig:
         dashboard_url=dashboard_url,
         dashboard_return_minutes=dashboard_return,
         sleep_minutes=sleep_minutes,
+        visualizer_style=visualizer_style,
+        visualizer_sensitivity=visualizer_sensitivity,
     )
 
 
@@ -147,6 +160,12 @@ class ConfigStore:
                     "PHOTO_VIEWER_DASHBOARD_RETURN_MINUTES", "0"
                 ),
                 "sleep_minutes": os.environ.get("PHOTO_VIEWER_SLEEP_MINUTES", "120"),
+                "visualizer_style": os.environ.get(
+                    "PHOTO_VIEWER_VISUALIZER_STYLE", "kaleidoscope"
+                ),
+                "visualizer_sensitivity": os.environ.get(
+                    "PHOTO_VIEWER_VISUALIZER_SENSITIVITY", "100"
+                ),
             }
             return validate(environment)
         try:

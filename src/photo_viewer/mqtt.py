@@ -176,6 +176,8 @@ class MqttBridge:
                 "date_year",
                 "date_month",
                 "sleep_minutes",
+                "visualizer_style",
+                "visualizer_sensitivity",
             }:
                 self._update_config(command, value)
                 self.runtime.next()
@@ -204,6 +206,8 @@ class MqttBridge:
             "date_year": "date_year",
             "date_month": "date_month",
             "sleep_minutes": "sleep_minutes",
+            "visualizer_style": "visualizer_style",
+            "visualizer_sensitivity": "visualizer_sensitivity",
         }[command]
         if command == "folder" and value == "/":
             raw[key] = ""
@@ -231,7 +235,7 @@ class MqttBridge:
             "name": self.device_name,
             "manufacturer": "Managed Pi",
             "model": "NAS Photo Viewer",
-            "sw_version": "0.8.0",
+            "sw_version": "0.9.0",
         }
         state = f"{self.base}/state"
         definitions = {
@@ -340,8 +344,28 @@ class MqttBridge:
                 "command_topic": f"{self.base}/command/mode",
                 "state_topic": state,
                 "value_template": "{{ value_json.display_mode }}",
-                "options": ["photos", "collage", "dashboard", "sleep"],
+                "options": ["photos", "collage", "dashboard", "visualizer", "sleep"],
                 "icon": "mdi:monitor-dashboard",
+            },
+            ("select", "visualizer_style"): {
+                "name": "Visualiser style",
+                "command_topic": f"{self.base}/command/visualizer_style",
+                "state_topic": state,
+                "value_template": "{{ value_json.visualizer_style }}",
+                "options": ["kaleidoscope", "plasma", "tunnel", "starfield"],
+                "icon": "mdi:creation",
+            },
+            ("number", "visualizer_sensitivity"): {
+                "name": "Visualiser sensitivity",
+                "command_topic": f"{self.base}/command/visualizer_sensitivity",
+                "state_topic": state,
+                "value_template": "{{ value_json.visualizer_sensitivity }}",
+                "min": 25,
+                "max": 300,
+                "step": 5,
+                "mode": "slider",
+                "unit_of_measurement": "%",
+                "icon": "mdi:tune-vertical",
             },
             ("text", "dashboard_url"): {
                 "name": "Dashboard URL",
@@ -392,6 +416,12 @@ class MqttBridge:
                 "command_topic": f"{self.base}/command/mode",
                 "payload_press": "collage",
                 "icon": "mdi:view-grid-plus",
+            },
+            ("button", "show_visualizer"): {
+                "name": "Show music visualiser",
+                "command_topic": f"{self.base}/command/mode",
+                "payload_press": "visualizer",
+                "icon": "mdi:waveform",
             },
             ("button", "sleep_display"): {
                 "name": "Sleep display",
@@ -479,6 +509,8 @@ class MqttBridge:
                 "date_month": config.date_month,
                 "date_month_label": MONTHS[config.date_month],
                 "rotation": snapshot["rotation"],
+                "visualizer_style": config.visualizer_style,
+                "visualizer_sensitivity": config.visualizer_sensitivity,
             }
         )
         self.client.publish(

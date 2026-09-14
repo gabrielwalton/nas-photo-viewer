@@ -9,6 +9,8 @@ const captureLocation = document.querySelector('#capture-location');
 const photos = [document.querySelector('#photo-a'), document.querySelector('#photo-b')];
 const video = document.querySelector('#video');
 const collage = document.querySelector('#collage');
+const visualizer = document.querySelector('#visualizer');
+const visualizerContext = visualizer.getContext('2d');
 let active = 0;
 let currentPath = '';
 let timer;
@@ -18,6 +20,10 @@ let loading = false;
 let displayMode = '';
 let collageItems = [];
 let currentRotation = 0;
+let visualizerFrame = 0;
+let visualizerPoll = 0;
+let visualizerData = {available: false, bass: 0, mid: 0, treble: 0, volume: 0, beat: 0, style: 'kaleidoscope', sensitivity: 100};
+const stars = Array.from({length: 220}, () => ({angle: Math.random() * Math.PI * 2, radius: Math.random(), size: .4 + Math.random() * 2.2, speed: .3 + Math.random() * 1.8}));
 
 async function json(url, options) {
   const response = await fetch(url, options);
@@ -220,9 +226,159 @@ async function rotateCollageItem() {
   }
 }
 
+function resizeVisualizer() {
+  const scale = Math.min(1, 1920 / window.innerWidth, 1080 / window.innerHeight);
+  const width = Math.max(640, Math.round(window.innerWidth * scale));
+  const height = Math.max(360, Math.round(window.innerHeight * scale));
+  if (visualizer.width !== width || visualizer.height !== height) {
+    visualizer.width = width;
+    visualizer.height = height;
+  }
+}
+
+async function pollVisualizer() {
+  try { visualizerData = await json('/api/visualizer/spectrum'); } catch (_error) { visualizerData.available = false; }
+}
+
+function visualizerLevels(time) {
+  const sensitivity = Number(visualizerData.sensitivity || 100) / 100;
+  if (visualizerData.available) {
+    return ['bass', 'mid', 'treble', 'volume'].map(name => Math.min(1.5, Number(visualizerData[name] || 0) * sensitivity));
+  }
+  return [
+    .46 + Math.sin(time * 2.1) * .22,
+    .42 + Math.sin(time * 1.37 + 2) * .2,
+    .38 + Math.sin(time * 3.4 + 1) * .18,
+    .52 + Math.sin(time * .83) * .12,
+  ];
+}
+
+function drawKaleidoscope(ctx, width, height, time, bass, mid, treble) {
+  const arms = 16;
+  const radius = Math.min(width, height) * (.22 + bass * .18);
+  ctx.save();
+  ctx.translate(width / 2, height / 2);
+  ctx.rotate(time * (.12 + treble * .24));
+  ctx.globalCompositeOperation = 'lighter';
+  for (let arm = 0; arm < arms; arm += 1) {
+    ctx.save();
+    ctx.rotate(arm * Math.PI * 2 / arms);
+    for (let index = 0; index < 18; index += 1) {
+      const phase = time * (1.5 + treble) + index * .5;
+      const distance = radius * index / 17;
+      const size = 3 + (bass * 18 + mid * 11) * (1 + Math.sin(phase)) / 2;
+      ctx.fillStyle = `hsla(${(time * 55 + arm * 24 + index * 9) % 360},100%,${55 + treble * 25}%,.5)`;
+      ctx.beginPath();
+      ctx.arc(distance, Math.sin(phase) * radius * .12, size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+function drawPlasma(ctx, width, height, time, bass, mid, treble) {
+  ctx.globalCompositeOperation = 'lighter';
+  for (let index = 0; index < 18; index += 1) {
+    const phase = time * (.35 + index * .013);
+    const x = width * (.5 + Math.sin(phase * 1.7 + index) * .38);
+    const y = height * (.5 + Math.cos(phase * 1.23 + index * .7) * .38);
+    const radius = Math.min(width, height) * (.05 + bass * .13 + (index % 4) * .012);
+    const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+    gradient.addColorStop(0, `hsla(${(time * 45 + index * 31) % 360},100%,65%,${.2 + mid * .28})`);
+    gradient.addColorStop(1, 'transparent');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+  }
+}
+
+function drawTunnel(ctx, width, height, time, bass, mid, treble) {
+  ctx.save();
+  ctx.translate(width / 2 + Math.sin(time) * width * .06, height / 2 + Math.cos(time * .7) * height * .06);
+  ctx.rotate(time * .08);
+  for (let ring = 0; ring < 36; ring += 1) {
+    const progress = (ring / 36 + time * (.08 + bass * .04)) % 1;
+    const radius = progress * Math.max(width, height) * .72;
+    ctx.strokeStyle = `hsla(${(ring * 17 + time * 70) % 360},100%,${48 + treble * 30}%,${1 - progress})`;
+    ctx.lineWidth = 1 + (1 - progress) * (4 + mid * 10);
+    ctx.beginPath();
+    const sides = 6 + (ring % 5);
+    for (let side = 0; side <= sides; side += 1) {
+      const angle = side * Math.PI * 2 / sides;
+      const x = Math.cos(angle) * radius;
+      const y = Math.sin(angle) * radius;
+      if (!side) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawStarfield(ctx, width, height, time, bass, mid, treble) {
+  ctx.save();
+  ctx.translate(width / 2, height / 2);
+  ctx.globalCompositeOperation = 'lighter';
+  const limit = Math.max(width, height) * .72;
+  for (const star of stars) {
+    star.radius += (.0015 + star.speed * .0015) * (1 + bass * 5);
+    if (star.radius > 1) star.radius = .008;
+    const distance = star.radius * star.radius * limit;
+    const x = Math.cos(star.angle + time * .03) * distance;
+    const y = Math.sin(star.angle + time * .03) * distance;
+    const size = star.size * (.5 + star.radius * 4) * (1 + treble);
+    ctx.fillStyle = `hsla(${(time * 38 + star.angle * 57 + mid * 90) % 360},100%,75%,${.25 + star.radius * .7})`;
+    ctx.fillRect(x, y, size, size);
+  }
+  ctx.restore();
+}
+
+function drawVisualizer(milliseconds) {
+  if (displayMode !== 'visualizer') return;
+  resizeVisualizer();
+  const time = milliseconds / 1000;
+  const {width, height} = visualizer;
+  const [bass, mid, treble, volume] = visualizerLevels(time);
+  visualizerContext.globalCompositeOperation = 'source-over';
+  visualizerContext.fillStyle = `rgba(2,0,9,${.11 + (1 - volume) * .08})`;
+  visualizerContext.fillRect(0, 0, width, height);
+  const style = visualizerData.style || 'kaleidoscope';
+  if (style === 'plasma') drawPlasma(visualizerContext, width, height, time, bass, mid, treble);
+  else if (style === 'tunnel') drawTunnel(visualizerContext, width, height, time, bass, mid, treble);
+  else if (style === 'starfield') drawStarfield(visualizerContext, width, height, time, bass, mid, treble);
+  else drawKaleidoscope(visualizerContext, width, height, time, bass, mid, treble);
+  if (!visualizerData.available) {
+    visualizerContext.globalCompositeOperation = 'source-over';
+    visualizerContext.fillStyle = 'rgba(255,255,255,.42)';
+    visualizerContext.font = `${Math.max(11, width / 120)}px system-ui`;
+    visualizerContext.fillText('Demo mode · connect a USB microphone for live response', 22, height - 22);
+  }
+  visualizerFrame = requestAnimationFrame(drawVisualizer);
+}
+
+function stopVisualizer() {
+  cancelAnimationFrame(visualizerFrame);
+  clearInterval(visualizerPoll);
+  visualizer.classList.remove('active');
+}
+
+async function startVisualizer() {
+  hideSlideshow();
+  hideCollage();
+  caption.classList.remove('visible');
+  message.classList.add('hidden');
+  visualizer.classList.add('active');
+  resizeVisualizer();
+  visualizerContext.fillStyle = '#020006';
+  visualizerContext.fillRect(0, 0, visualizer.width, visualizer.height);
+  await pollVisualizer();
+  visualizerPoll = setInterval(pollVisualizer, 90);
+  visualizerFrame = requestAnimationFrame(drawVisualizer);
+}
+
 async function activateMode(mode, force = false) {
   if (!force && displayMode === mode) return;
   clearTimeout(timer);
+  stopVisualizer();
   displayMode = mode;
   document.querySelector('#viewer').classList.toggle('sleeping', mode === 'sleep');
   if (mode === 'sleep') {
@@ -238,6 +394,8 @@ async function activateMode(mode, force = false) {
     hideCollage();
     currentPath = '';
     await showNext();
+  } else if (mode === 'visualizer') {
+    await startVisualizer();
   }
 }
 

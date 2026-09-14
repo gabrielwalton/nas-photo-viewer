@@ -12,6 +12,7 @@
     <img id="photo-b" class="photo" alt="">
     <video id="video" class="video" playsinline></video>
     <section id="collage" class="collage" aria-label="Photo collage"></section>
+    <canvas id="visualizer" class="visualizer" aria-label="Music visualiser"></canvas>
     <section id="message" class="message-card">
       <h1>NAS Photo Viewer</h1>
       <p id="message-text">Open settings to connect your photo and video library.</p>
@@ -50,6 +51,10 @@
       <label>Home Assistant dashboard URL<input name="dashboard_url" type="url" placeholder="http://homeassistant:8123/dashboard/home?kiosk"></label>
       <label>Return to photos after (minutes)<input name="dashboard_return_minutes" type="number" min="0" max="1440"><small>Use 0 to stay on the dashboard.</small></label>
       <label>Sleep after (minutes)<input name="sleep_minutes" type="number" min="0" max="1440"><small>Defaults to 120 minutes. Use 0 to disable automatic sleep.</small></label>
+      <div class="two-columns">
+        <label>Visualiser style<select name="visualizer_style"><option value="kaleidoscope">Kaleidoscope</option><option value="plasma">Plasma</option><option value="tunnel">Tunnel</option><option value="starfield">Starfield</option></select></label>
+        <label>Visualiser sensitivity (%)<input name="visualizer_sensitivity" type="number" min="25" max="300" step="5"></label>
+      </div>
       <p id="form-status"></p>
       <footer><button type="button" id="test-button" class="secondary">Save and test</button><button type="submit">Save settings</button></footer>
     </form>

@@ -275,6 +275,13 @@ def test_display_mode_writes_url_and_returns_to_photos(tmp_path):
     assert response.json["display_mode"] == "collage"
     assert (tmp_path / "kiosk-url").read_text().strip() == "http://127.0.0.1:8080"
     assert restarts == [True, True, True]
+    response = client.post("/api/display", json={"mode": "visualizer"})
+    assert response.json["display_mode"] == "visualizer"
+    assert restarts == [True, True, True, True]
+    spectrum = client.get("/api/visualizer/spectrum").json
+    assert spectrum["ok"] is True
+    assert spectrum["available"] is False
+    assert spectrum["style"] == "kaleidoscope"
     response = client.post("/api/display", json={"mode": "sleep"})
     assert response.json["display_mode"] == "sleep"
-    assert restarts == [True, True, True, True]
+    assert restarts == [True, True, True, True, True]

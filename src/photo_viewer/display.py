@@ -75,9 +75,9 @@ class DisplayController:
         sleep_minutes: int = 0,
     ) -> None:
         mode = mode.strip().lower()
-        if mode not in {"photos", "collage", "dashboard", "sleep"}:
+        if mode not in {"photos", "collage", "dashboard", "visualizer", "sleep"}:
             raise ValueError(
-                "Display mode must be photos, collage, dashboard or sleep"
+                "Display mode must be photos, collage, dashboard, visualizer or sleep"
             )
         if mode == "dashboard":
             if not self.supported:

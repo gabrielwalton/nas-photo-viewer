@@ -23,6 +23,16 @@ def test_parent_folder_is_rejected():
         validate({"base_folder": "family/../private"})
 
 
+def test_visualizer_settings_are_validated():
+    config = validate(
+        {"visualizer_style": "tunnel", "visualizer_sensitivity": 175}
+    )
+    assert config.visualizer_style == "tunnel"
+    assert config.visualizer_sensitivity == 175
+    with pytest.raises(ConfigError):
+        validate({"visualizer_style": "unknown"})
+
+
 def test_store_uses_private_permissions(tmp_path):
     store = ConfigStore(tmp_path)
     store.save(ViewerConfig())

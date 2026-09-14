@@ -24,6 +24,7 @@ from flask import (
     stream_with_context,
 )
 
+from .audio import AudioAnalyzer
 from .config import ConfigError, ConfigStore, clean_relative, validate
 from .display import DisplayController
 from .mqtt import MqttBridge
@@ -309,6 +310,9 @@ def create_app(test_config: dict | None = None) -> Flask:
         terminate_browser=app.config.get("PHOTO_VIEWER_TERMINATE_BROWSER"),
     )
     display.reset_to_photos(store.load().sleep_minutes)
+    audio = AudioAnalyzer(lambda: display.mode == "visualizer")
+    if not app.config.get("TESTING"):
+        audio.start()
 
     def refresh_for_mqtt() -> tuple[int, str, list[str], list[str]]:
         items = catalogue.refresh(store)
@@ -383,6 +387,18 @@ def create_app(test_config: dict | None = None) -> Flask:
     def health():
         return jsonify({"ok": True})
 
+    @app.get("/api/visualizer/spectrum")
+    def visualizer_spectrum():
+        config = store.load()
+        return jsonify(
+            {
+                "ok": True,
+                **audio.snapshot(),
+                "style": config.visualizer_style,
+                "sensitivity": config.visualizer_sensitivity,
+            }
+        )
+
     @app.get("/api/diagnostics/audio")
     def audio_diagnostics():
         proc = {}
@@ -417,7 +433,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                 "sound_devices": sound_devices,
                 "commands": {
                     command: bool(shutil.which(command))
-                    for command in ("aplay", "pactl", "wpctl", "pw-cli")
+                    for command in ("aplay", "arecord", "pactl", "wpctl", "pw-cli")
                 },
             }
         )
